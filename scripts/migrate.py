@@ -20,8 +20,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 def run_in_docker(container_name, db_url, alembic_args):
-    """Checks if the docker container is running and executes the alembic command inside it."""
+    """Executes the alembic command inside Docker (exec if running, compose run if stopped)."""
     # ── Check if container is running ────────────────────────────────────────
+    running = False
     try:
         result = subprocess.run(
             ["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Names}}"],
@@ -30,12 +31,7 @@ def run_in_docker(container_name, db_url, alembic_args):
             check=True
         )
         running_names = [name.strip() for name in result.stdout.strip().split("\n") if name.strip()]
-        
-        # Verify exact container name match (handling possible partial matches in docker filter)
-        if container_name not in running_names:
-            print(f"ERROR: Docker container '{container_name}' is not running.")
-            print("       Start it with: docker compose up -d")
-            sys.exit(1)
+        running = container_name in running_names
     except FileNotFoundError:
         print("ERROR: 'docker' command not found. Ensure Docker Desktop is installed and running.")
         sys.exit(1)
@@ -43,13 +39,21 @@ def run_in_docker(container_name, db_url, alembic_args):
         print(f"ERROR checking docker status: {e.stderr or e}")
         sys.exit(1)
 
-    # ── Prepare docker exec command ──────────────────────────────────────────
-    cmd = [
-        "docker", "exec",
-        container_name,
-        "env", f"DATABASE_URL={db_url}",
-        "alembic"
-    ] + alembic_args
+    # ── Prepare docker command ───────────────────────────────────────────────
+    if running:
+        cmd = [
+            "docker", "exec",
+            container_name,
+            "env", f"DATABASE_URL={db_url}",
+            "alembic"
+        ] + alembic_args
+    else:
+        cmd = [
+            "docker", "compose", "run", "--rm",
+            "-e", f"DATABASE_URL={db_url}",
+            "whiskers-agent",
+            "alembic"
+        ] + alembic_args
 
     try:
         subprocess.run(cmd, check=True)

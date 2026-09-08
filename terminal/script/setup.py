@@ -92,6 +92,8 @@ def _db_reachability() -> tuple[bool, str]:
     try:
         parsed = urlparse(url.replace("postgresql+psycopg://", "postgresql://", 1))
         host = parsed.hostname or "localhost"
+        if host == "postgres" and not os.path.exists("/.dockerenv"):
+            host = "localhost"
         port = parsed.port or 5432
     except Exception as exc:
         return False, str(exc)
@@ -588,9 +590,9 @@ def run_plugin_migrate(args=None) -> int:
 
 
 def run_db(args=None) -> int:
-    """Bring up the full Docker stack and wait for postgres readiness."""
+    """Bring up the database stack and wait for postgres readiness."""
     dev = getattr(args, "dev", False) if args is not None else False
-    rc = docker_compose_up([], detached=True, dev=dev)
+    rc = docker_compose_up(["postgres", "minio"], detached=True, dev=dev)
     if rc != 0:
         return rc
     if not wait_for_postgres():
