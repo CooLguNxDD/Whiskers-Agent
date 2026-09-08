@@ -1,0 +1,71 @@
+"""Core semantic memory — registry, dual backends, harness instructions."""
+
+from core.memory.collections import (
+    ALLOWED_TIERS,
+    COLLECTION_CORE_INSTRUCTIONS,
+    COLLECTION_GLOBAL,
+    COLLECTION_PLAN_ANTI,
+    COLLECTION_PLAN_RECIPES,
+    MCP_DELETE_COLLECTIONS,
+    MCP_READ_COLLECTIONS,
+    MCP_WRITE_COLLECTIONS,
+    resolve_mcp_collection,
+)
+from core.memory.harness_instructions import (
+    delete_instruction,
+    format_instructions_text,
+    format_instructions_text_async,
+    get_harness_instructions,
+    seed_from_defaults,
+    upsert_instruction,
+)
+from core.memory.registry import (
+    MemoryNamespace,
+    MemoryRegistry,
+    get_memory_registry,
+    normalize_memory_entries,
+    plugin_collection,
+    reset_memory_registry_for_tests,
+)
+from core.memory.service import (
+    delete_memory,
+    list_memories,
+    save_anti_pattern,
+    save_memory,
+    save_plan_recipe,
+    search_anti_patterns,
+    search_memory,
+    search_plan_recipes,
+)
+
+__all__ = [
+    "ALLOWED_TIERS",
+    "COLLECTION_CORE_INSTRUCTIONS",
+    "COLLECTION_GLOBAL",
+    "COLLECTION_PLAN_ANTI",
+    "COLLECTION_PLAN_RECIPES",
+    "MCP_DELETE_COLLECTIONS",
+    "MCP_READ_COLLECTIONS",
+    "MCP_WRITE_COLLECTIONS",
+    "MemoryNamespace",
+    "MemoryRegistry",
+    "delete_instruction",
+    "delete_memory",
+    "format_instructions_text",
+    "format_instructions_text_async",
+    "get_harness_instructions",
+    "get_memory_registry",
+    "list_memories",
+    "normalize_memory_entries",
+    "plugin_collection",
+    "reset_memory_registry_for_tests",
+    "resolve_mcp_collection",
+    "save_anti_pattern",
+    "save_memory",
+    "save_plan_recipe",
+    "search_anti_patterns",
+    "search_memory",
+    "search_plan_recipes",
+    "seed_from_defaults",
+    "upsert_instruction",
+]

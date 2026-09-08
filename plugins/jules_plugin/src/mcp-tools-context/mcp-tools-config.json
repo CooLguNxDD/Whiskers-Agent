@@ -1,0 +1,39 @@
+{
+  "generated": "2026-06-05T22:31:33.989405+00:00",
+  "section_classification": {
+    "strategy": "dynamic",
+    "section_aliases": {},
+    "ignored_path_segments": [
+      "api",
+      "projects"
+    ]
+  },
+  "sections": {
+    "sources": {
+      "read": [
+        "ListSources",
+        "GetSource"
+      ]
+    },
+    "sessions": {
+      "read": [
+        "ListSessions",
+        "GetSession"
+      ],
+      "write_update": [
+        "CreateSession",
+        "ApprovePlan",
+        "SendMessage"
+      ],
+      "delete": [
+        "DeleteSession"
+      ]
+    },
+    "activities": {
+      "read": [
+        "ListActivities",
+        "GetActivity"
+      ]
+    }
+  }
+}

@@ -1,0 +1,4 @@
+## 2025-02-23 - [Remove `ast.literal_eval` DoS Vulnerability in dynamic tools]
+**Vulnerability:** A fallback to `ast.literal_eval` was present when parsing untrusted JSON-like inputs in `core/dynamic_tools/loader.py`, opening a potential Denial of Service (DoS) attack vector due to unbounded recursion limits during AST parsing.
+**Learning:** Even though `ast.literal_eval` is safer than `eval()`, it cannot safely parse arbitrary, deeply nested untrusted structures and can crash the interpreter. Standard JSON should strictly be parsed with `json.loads` catching standard decoding exceptions instead.
+**Prevention:** Remove fallback parsing routes using Python-native evaluators for expected JSON inputs. Accept that invalid JSON (e.g. using Python syntax) should gracefully fail parsing instead of falling back to risky evaluation routines.

@@ -1,0 +1,35 @@
+# Local Pullfrog (no pullfrog.com dashboard)
+# Orchestration is entirely GitHub Actions + this config.
+
+mention: "@pullfrog"
+runner_labels: ubuntu
+
+# Official Pullfrog Agent Image
+image:
+  repository: ghcr.io/coolgunxdd/pullfrog-agent:latest
+  tag: latest
+
+action:
+  uses: CooLguNxDD/pullfrog-lemon-custom-build@85447c7a308d8285769a000fcc3824a9b0c9dc59
+
+features:
+  dispatch: false
+  # Explicit @pullfrog in issue/PR comments only.
+  mention_triggers: false
+  pr_review:
+    enabled: false
+    include_drafts: false
+    on_synchronize: false
+  issues:
+    enabled: false
+    mode: plan # plan | build
+
+  # Auto-address / CI-fix can push commits. Gate with only_bot_prs.
+  address_reviews:
+    enabled: false
+    only_bot_prs: true
+  ci_fix:
+    enabled: false
+    only_bot_prs: true
+
+status_checks: false

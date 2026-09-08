@@ -1,0 +1,18 @@
+{
+  "name": "whiskers-oct",
+  "owner": {
+    "name": "CooLguNxDD"
+  },
+  "plugins": [
+    {
+      "name": "portfolio-gen",
+      "source": "./claude-plugins/portfolio-gen",
+      "description": "Portfolio generation harness for CatPortfolio: layout.yaml authoring, block component generation, compile/verify gate, PR conventions."
+    },
+    {
+      "name": "world-context",
+      "source": "./claude-plugins/world-context",
+      "description": "Unity world semantic context: routing skill + /world-index and /world-query for Whiskers Agent world_semantic_plugin (H3 spatial store)."
+    }
+  ]
+}

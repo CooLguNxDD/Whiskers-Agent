@@ -1,0 +1,57 @@
+{
+  "_comment": "Embedding model profiles for semantic search and RAG. API keys live in .env / vault — not in this file. Copy to embedding_config.json and set active to a profile key under models.",
+
+  "active": "openai",
+  "models": {
+    "gemma": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "embeddinggemma:300m",
+      "dimensions": 768,
+      "query_prefix": "task: search result | query: {text}",
+      "document_prefix": "title: {title} | text: {text}",
+      "default_title": "none"
+    },
+    "gemini": {
+      "enabled": false,
+      "provider": "gemini",
+      "model": "gemini-embedding-001",
+      "dimensions": 3072,
+      "query_prefix": "task: search result | query: {text}",
+      "document_prefix": "title: {title} | text: {text}",
+      "default_title": "none"
+    },
+    "openai": {
+      "enabled": true,
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 1536,
+      "query_prefix": "{text}",
+      "document_prefix": "{text}"
+    },
+    "voyage": {
+      "enabled": false,
+      "provider": "voyage",
+      "model": "voyage-4",
+      "dimensions": 1024,
+      "query_prefix": "{text}",
+      "document_prefix": "{text}"
+    },
+    "jina": {
+      "enabled": false,
+      "provider": "openai",
+      "model": "jina-embeddings-v3",
+      "dimensions": 1024,
+      "query_prefix": "Query: {text}",
+      "document_prefix": "Document: {text}"
+    },
+    "nomic": {
+      "enabled": false,
+      "provider": "openai",
+      "model": "nomic-embed-text-v1.5",
+      "dimensions": 768,
+      "query_prefix": "search_query: {text}",
+      "document_prefix": "search_document: {text}"
+    }
+  }
+}

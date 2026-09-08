@@ -1,0 +1,87 @@
+[project]
+name = "whiskers-agent-mcp"
+version = "0.0.0"
+description = "Whiskers Agent MCP Server"
+requires-python = ">=3.11"
+readme = "ReadMe.md"
+
+# Runtime deps stay in requirements.txt (Docker install path).
+# Lint/type tools: pip install -r requirements-dev.txt
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["api", "core", "core_graph", "db_layer", "oauth", "plugins", "utils", "scripts", "test"]
+extend-exclude = [
+  ".venv",
+  "frontend",
+  "node_modules",
+  "logs",
+  "pgadmin",
+  "whiskers-vscode",
+  "whiskers-design-temp",
+  "mcps",
+  "**/__pycache__",
+]
+
+[tool.ruff.lint]
+# Start narrow: bugbear + bare-except hygiene. Expand as the backlog is paid down.
+select = [
+  "E9",   # runtime syntax errors
+  "F63",  # invalid print/assert
+  "F7",   # syntax error in type comment
+  "F82",  # undefined names (critical)
+  "B",    # flake8-bugbear
+  "E722", # bare except
+  "S110", # try-except-pass (bandit)
+  "S112", # try-except-continue
+]
+ignore = [
+  # Too noisy on existing code; enable later when sweeping.
+  "B008",  # function call in default arg
+  "B904",  # raise from
+  "B905",  # zip strict=
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally use broad mocks / bare patterns. Plugin tests live under
+# plugins/<plugin>/tests/ (see the plugin test/data-access relocation in
+# CLAUDE.md) and must be linted the same as test/, not more strictly.
+"test/**" = ["S110", "S112", "B"]
+"plugins/*/tests/**" = ["S110", "S112", "B"]
+"**/migrations/**" = ["E722", "S110", "S112"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = []
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = false
+check_untyped_defs = false
+disallow_untyped_defs = false
+# Scoped first (plan): only api/ + core_graph/ are gated in CI.
+# Repo-wide strict will not land while ~150 existing violations remain.
+files = ["api", "core_graph"]
+exclude = [
+  "(^|/)migrations(/|$)",
+  "(^|/)test(/|$)",
+  "(^|/)frontend(/|$)",
+  "(^|/)node_modules(/|$)",
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "langchain.*",
+  "langgraph.*",
+  "fastmcp.*",
+  "mcp.*",
+  "minio.*",
+  "pgvector.*",
+  "h3.*",
+  "ddgs.*",
+]
+ignore_missing_imports = true
+
+# Pytest config stays in pytest.ini (single source of truth).

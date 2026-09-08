@@ -1,0 +1,1 @@
+"""Rich terminal UI screens for Whiskers Agent MCP setup and credentials."""

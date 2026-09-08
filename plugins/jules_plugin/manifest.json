@@ -1,0 +1,25 @@
+{
+  "name": "jules_plugin",
+  "version": "1.0.0",
+  "description": "Jules REST API plugin for creating and managing coding sessions.",
+  "tier": "pro",
+  "config": "config.json",
+  "api_url": "https://jules.googleapis.com",
+  "required_credentials": ["JULES_API_KEY"],
+  "layer2_oauth_enabled": false,
+  "external_oauth": {
+    "jules": {
+      "login_path": "/v1alpha/login",
+      "auth_header": ""
+    }
+  },
+  "scopes": [
+    {"token": "plugin:jules_plugin", "description": "Full access to Jules sessions"},
+    {"token": "group:jules_plugin:read", "description": "Read Jules sessions/activities"},
+    {"token": "group:jules_plugin:write_update", "description": "Create and update Jules sessions"}
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "skills": ["skills/jules-sessions/SKILL.md"]
+}

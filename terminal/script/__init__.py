@@ -1,0 +1,1 @@
+"""Runnable entry scripts for terminal TUIs."""

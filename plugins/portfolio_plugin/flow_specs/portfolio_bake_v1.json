@@ -1,0 +1,59 @@
+{
+  "flow_id": "portfolio_bake_v1",
+  "name": "Portfolio Job-Tailored Bake",
+  "claims": {
+    "goal_classes": ["bake_for_job"],
+    "any_keywords": [
+      "portfolio", "portfolio layout", "genui", "bake", "short_id",
+      "star story", "project grid", "catportfolio", "resume site"
+    ]
+  },
+  "requires": ["have:job_signals"],
+  "provides": ["did:bake_portfolio", "have:portfolio_short_id"],
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {"type": "string"},
+      "job_description": {"type": "string"},
+      "company": {"type": "string"},
+      "role": {"type": "string"},
+      "job_application_job_id": {"type": "string"},
+      "provider": {"type": "string"},
+      "posting_url": {"type": "string"},
+      "theme": {"type": "string"}
+    },
+    "required": ["goal", "job_description", "company", "role"]
+  },
+  "stages": [
+    {
+      "id": "resolve_signals",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__resolve_bake_job_signals",
+      "reads": ["goal", "job_description", "company", "role"],
+      "writes": ["company", "role", "job_description"],
+      "required_outputs": ["company", "role"],
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "author_display",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__author_project_display_copy",
+      "reads": ["company", "role", "job_description"],
+      "writes": ["display_copy_by_slug"],
+      "required_outputs": ["display_copy_by_slug"],
+      "on_fail": "continue"
+    },
+    {
+      "id": "bake",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__bake_portfolio_for_job",
+      "reads": [
+        "job_description", "company", "role", "job_application_job_id",
+        "provider", "posting_url", "theme", "display_copy_by_slug"
+      ],
+      "writes": ["short_id", "layout", "query_param", "audience"],
+      "required_outputs": ["short_id"],
+      "on_fail": "fail_closed"
+    }
+  ]
+}

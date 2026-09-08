@@ -1,0 +1,39 @@
+{
+  "name": "world_semantic_plugin",
+  "version": "0.1.0",
+  "tier": "free",
+  "description": "Spatial world context store for Unity: H3 hex indexing, scene object sync, and agent-facing query tools (pgvector-ready).",
+  "author": "CCLemonExp",
+  "requires": [],
+  "capabilities": [
+    "query_context",
+    "describe_region",
+    "get_hex",
+    "list_objects_in_hex",
+    "world_index_ingest",
+    "plan_placement",
+    "claim_hexes",
+    "release_hexes",
+    "renew_lease",
+    "critique_region"
+  ],
+  "scopes": [
+    {"token": "plugin:world_semantic_plugin", "description": "Full access to world semantic tools"},
+    {"token": "group:world_semantic_plugin:read", "description": "Query spatial world and hex objects"},
+    {"token": "group:world_semantic_plugin:write", "description": "Claim, lease, and place spatial world objects"}
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "schema": {
+    "migrations_path": "migrations",
+    "min_core_revision": "core_040",
+    "auto_migrate": true
+  },
+  "settings": {
+    "default_base_res": 10,
+    "default_anchor_lat": 0.0,
+    "default_anchor_lng": 0.0,
+    "default_meters_per_degree": 111320.0
+  }
+}
