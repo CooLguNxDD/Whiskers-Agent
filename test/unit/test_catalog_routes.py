@@ -16,6 +16,7 @@ from core.route_registry.operation_descriptor import (
     AccessClass,
     HttpExposure,
     OperationDescriptor,
+    UiContribution,
     Visibility,
 )
 from core.route_registry.route_descriptor import RouteDescriptor
@@ -108,6 +109,10 @@ async def test_catalog_list_returns_revision_and_ops() -> None:
     assert len(data["operations"]) == 1
     assert data["operations"][0]["operation_id"] == "p1__op"
     assert res.headers.get("etag") or res.headers.get("ETag")
+    # no-store (not "private, no-cache") — a browser-level silent revalidation
+    # collapses the FE's live snapshot into a phantom 304 with no cached body
+    # (see api/catalog.ts::getCatalog / api/catalogRuntime.ts::ensureCatalogClient).
+    assert res.headers.get("cache-control") == "no-store"
 
 
 @pytest.mark.asyncio
@@ -117,13 +122,145 @@ async def test_catalog_list_304_on_etag_match() -> None:
         "p1",
         [OperationDescriptor(plugin_id="p1", operation_id="op", description="d")],
     )
-    etag = cat.etag
 
     with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["admin"])):
-        req = _make_request(headers={"if-none-match": etag})
-        res = await api_catalog_list(req)
+        first = await api_catalog_list(_make_request())
+        assert first.status_code == 200
+        etag = first.headers.get("etag") or first.headers.get("ETag")
+        assert etag
+        # Global catalog hash is not the HTTP validator for a filtered view.
+        assert etag != cat.etag
+
+        res = await api_catalog_list(_make_request(headers={"if-none-match": etag}))
 
     assert res.status_code == 304
+    assert (res.headers.get("etag") or res.headers.get("ETag")) == etag
+    assert res.headers.get("cache-control") == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_catalog_list_does_not_304_on_global_catalog_etag() -> None:
+    cat = get_operation_catalog()
+    cat.publish_owner(
+        "p1",
+        [OperationDescriptor(plugin_id="p1", operation_id="op", description="d")],
+    )
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["admin"])):
+        res = await api_catalog_list(_make_request(headers={"if-none-match": cat.etag}))
+
+    assert res.status_code == 200
+    assert res.headers.get("cache-control") == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_catalog_list_plugin_filter_has_distinct_etag() -> None:
+    cat = get_operation_catalog()
+    cat.publish_owner(
+        "p1",
+        [OperationDescriptor(plugin_id="p1", operation_id="p1__a", description="a")],
+    )
+    cat.publish_owner(
+        "p2",
+        [OperationDescriptor(plugin_id="p2", operation_id="p2__b", description="b")],
+    )
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["admin"])):
+        unfiltered = await api_catalog_list(_make_request())
+        import json
+        all_etag = unfiltered.headers.get("etag") or unfiltered.headers.get("ETag")
+        assert unfiltered.status_code == 200
+        assert len(json.loads(unfiltered.body)["operations"]) == 2
+
+        filtered = await api_catalog_list(
+            _make_request(query="plugin_id=p1", headers={"if-none-match": all_etag}),
+        )
+        assert filtered.status_code == 200
+        data = json.loads(filtered.body)
+        assert [o["plugin_id"] for o in data["operations"]] == ["p1"]
+        p1_etag = filtered.headers.get("etag") or filtered.headers.get("ETag")
+        assert p1_etag != all_etag
+
+        again = await api_catalog_list(
+            _make_request(query="plugin_id=p1", headers={"if-none-match": p1_etag}),
+        )
+        assert again.status_code == 304
+        assert again.headers.get("cache-control") == "no-store"
+
+
+@pytest.mark.asyncio
+async def test_catalog_list_scopes_have_distinct_etag() -> None:
+    cat = get_operation_catalog()
+    cat.publish_owner(
+        "p1",
+        [
+            OperationDescriptor(
+                plugin_id="p1",
+                operation_id="alpha",
+                description="a",
+                required_scopes=("plugin:alpha",),
+            ),
+            OperationDescriptor(
+                plugin_id="p1",
+                operation_id="beta",
+                description="b",
+                required_scopes=("plugin:beta",),
+            ),
+        ],
+    )
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["plugin:alpha"])):
+        alpha = await api_catalog_list(_make_request())
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["plugin:beta"])):
+        beta = await api_catalog_list(_make_request())
+
+    import json
+    assert {o["operation_id"] for o in json.loads(alpha.body)["operations"]} == {"alpha"}
+    assert {o["operation_id"] for o in json.loads(beta.body)["operations"]} == {"beta"}
+    alpha_etag = alpha.headers.get("etag") or alpha.headers.get("ETag")
+    beta_etag = beta.headers.get("etag") or beta.headers.get("ETag")
+    assert alpha_etag != beta_etag
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["plugin:beta"])):
+        collapsed = await api_catalog_list(_make_request(headers={"if-none-match": alpha_etag}))
+    assert collapsed.status_code == 200
+    assert {o["operation_id"] for o in json.loads(collapsed.body)["operations"]} == {"beta"}
+
+
+@pytest.mark.asyncio
+async def test_catalog_list_slot_filter_has_distinct_etag() -> None:
+    cat = get_operation_catalog()
+    cat.publish_owner(
+        "p1",
+        [
+            OperationDescriptor(
+                plugin_id="p1",
+                operation_id="act",
+                description="a",
+                ui=UiContribution(slot="plugin.detail.actions", renderer_kind="form"),
+            ),
+            OperationDescriptor(
+                plugin_id="p1",
+                operation_id="other",
+                description="b",
+            ),
+        ],
+    )
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["admin"])):
+        unfiltered = await api_catalog_list(_make_request())
+        all_etag = unfiltered.headers.get("etag") or unfiltered.headers.get("ETag")
+        slotted = await api_catalog_list(
+            _make_request(
+                query="slot=plugin.detail.actions",
+                headers={"if-none-match": all_etag},
+            ),
+        )
+
+    import json
+    assert slotted.status_code == 200
+    assert [o["operation_id"] for o in json.loads(slotted.body)["operations"]] == ["act"]
+    assert (slotted.headers.get("etag") or slotted.headers.get("ETag")) != all_etag
 
 
 @pytest.mark.asyncio
@@ -189,6 +326,7 @@ async def test_catalog_openapi_returns_http_paths() -> None:
     assert "/things" in doc["paths"]
     assert doc["paths"]["/things"]["get"]["operationId"] == "p1__list"
     assert res.headers.get("etag") or res.headers.get("ETag")
+    assert res.headers.get("cache-control") == "no-store"
 
 
 @pytest.mark.asyncio
@@ -227,3 +365,37 @@ async def test_catalog_openapi_filters_by_plugin_id() -> None:
     import json
     doc = json.loads(res.body)
     assert set(doc["paths"]) == {"/a"}
+
+
+@pytest.mark.asyncio
+async def test_catalog_openapi_304_on_view_etag_match() -> None:
+    cat = get_operation_catalog()
+    cat.publish_owner(
+        "p1",
+        [
+            OperationDescriptor(
+                plugin_id="p1",
+                operation_id="p1__list",
+                description="List things",
+                http=HttpExposure(method="GET", path_template="/things"),
+            ),
+        ],
+    )
+
+    with patch("api.catalog_routes._resolve_caller_scopes", new=AsyncMock(return_value=["admin"])):
+        first = await api_catalog_openapi(
+            _make_request(path="/api/catalog/session_gated/openapi"),
+        )
+        assert first.status_code == 200
+        etag = first.headers.get("etag") or first.headers.get("ETag")
+        assert etag
+        assert etag != cat.etag
+        res = await api_catalog_openapi(
+            _make_request(
+                path="/api/catalog/session_gated/openapi",
+                headers={"if-none-match": etag},
+            ),
+        )
+
+    assert res.status_code == 304
+    assert res.headers.get("cache-control") == "no-store"

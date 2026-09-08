@@ -104,8 +104,8 @@ return callCatalogOp("api.plugins", "api_get_plugin_widget", { plugin_id: id })
 | `src/api/catalogRuntime.ts` | Module-level snapshot + **`callCatalogOp`** / `resolveCatalogPath` |
 | `src/api/catalogClient.ts` | **Hand-authored typed namespaces** over `callCatalogOp` (`catalogClient.plugins.enable(id)`, …) — the sanctioned entrypoint for every `src/api/*.ts` module; see its module docstring for the `api.route`/`api_list_routes` dual-response-shape example. No codegen source exists for operation types, so this is authored and kept in sync by hand. |
 | `src/api/inferenceClient.ts` | `resolveHttpCall`, `invokeCatalogOperation`, path param fill |
-| `src/api/generated/createCatalogClient.ts` | `createCatalogClient` + `client.op` (lower-level factory `catalogClient.ts`/`catalogRuntime.ts` build on) |
-| `src/hooks/useCatalog.ts` | Query + seed `setCatalogSnapshot` |
+| `src/api/generated/createCatalogClient.ts` | `createCatalogClient` + `client.op` (lower-level factory `catalogClient.ts`/`catalogRuntime.ts` build on). Snapshot miss peeks the live module catalog then refresh-once — same path for `call` and `op`; never a blind `/execute` POST. |
+| `src/hooks/useCatalog.ts` | Query + seed `setCatalogSnapshot` (unfiltered 200 only). 304 reuses this query key's cache or throws — never `getCatalogOperations()` into a filtered query. |
 | `src/components/shell/AppShell.tsx` | Prefetches full catalog on shell mount |
 | `src/components/inference/SchemaForm.tsx` | JSON Schema form + async options |
 | `src/components/inference/CatalogActionsPanel.tsx` | Plugin detail actions tab |
@@ -171,7 +171,7 @@ Path grammar: `/api/catalog/{gate}/…` with `AuthPolicy.SESSION_GATED`.
 ### GET `/api/catalog/session_gated`
 
 Query: optional `plugin_id`, `slot`. Response: `{ revision, etag, operations }`.  
-`If-None-Match` → **304**.
+`If-None-Match` → **304** only when the ETag names **this** filtered view (caller scopes + `plugin_id` + `slot`), never the global `catalog.etag`. `Cache-Control: no-store` on both 200 and 304. A 304 must not be coerced into an empty or unfiltered catalog snapshot on the console (`useCatalogQuery` reuses *that query's* prior data or throws).
 
 ### GET `/api/catalog/session_gated/openapi`
 
@@ -214,10 +214,12 @@ FE:
 ```bash
 npm --prefix frontend/cat-admin-frontend run test:unit -- \
   src/api/__tests__/catalog.test.ts \
+  src/api/__tests__/catalogRuntime.test.ts \
   src/api/__tests__/createCatalogClient.test.ts \
   src/api/__tests__/inferenceClient.test.ts \
   src/api/__tests__/apiKeys.test.ts \
   src/api/__tests__/catalogClientBoundary.test.ts \
+  src/hooks/__tests__/useCatalog.test.ts \
   src/components/inference/__tests__/SchemaForm.test.tsx
 ```
 
