@@ -71,7 +71,7 @@ async def api_catalog_list(request: Request) -> Response:
     catalog = get_operation_catalog()
     etag = catalog.etag
     if _match_etag(request, etag):
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-store"})
 
     caller_scopes = await _resolve_caller_scopes(request)
     ops = catalog.filter_for_caller(caller_scopes)
@@ -92,7 +92,7 @@ async def api_catalog_list(request: Request) -> Response:
         body,
         headers={
             "ETag": etag,
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": "no-store",
         },
     )
 
@@ -110,7 +110,7 @@ async def api_catalog_openapi(request: Request) -> Response:
     catalog = get_operation_catalog()
     etag = catalog.etag
     if _match_etag(request, etag):
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "private, no-cache"})
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-store"})
 
     caller_scopes = await _resolve_caller_scopes(request)
     ops = catalog.filter_for_caller(caller_scopes)
@@ -126,7 +126,7 @@ async def api_catalog_openapi(request: Request) -> Response:
         doc,
         headers={
             "ETag": etag,
-            "Cache-Control": "private, no-cache",
+            "Cache-Control": "no-store",
         },
     )
 
