@@ -292,7 +292,7 @@ goals/                  agent goal files / achieve() persistence
 ### Route conventions
 - Gated: `/api/{name}/session_gated/...`; public admin: `/api/admin/public/*`.
 - Path grammar built by `core/route_registry/path_builder.py`.
-- Catalog REST: `GET /api/catalog/session_gated`, `GET …/openapi`, `POST …/execute`.
+- Catalog REST: `GET /api/catalog/session_gated`, `GET …/openapi`, `POST …/execute`. List/OpenAPI ETag is the **filtered view** (scopes + `plugin_id` + `slot`), not `catalog.etag`; `Cache-Control: no-store` on 200 and 304. Console `useCatalogQuery` treats 304 as reuse-this-query or throw — never an empty/`getCatalogOperations()` snapshot. `CatalogClient.call`/`op` refresh-once on a snapshot miss (no blind `/execute`).
 - Rate limiting: sliding window per IP on `rate_limit.path_prefixes` (default `/mcp`, `/portfolio`) → 429 + `Retry-After`; in-memory, not cross-worker.
 - CORS: `MCP_CORS_ORIGINS` allowlist; relaxed wildcard mode is an **explicit opt-in** via `MCP_CORS_RELAXED` (`utils/server_config.py::resolve_cors_policy`).
 - Admin console: session-gated queries wait for `/api/admin/public/me` (`useAuthedQueryEnabled`); TOTP enrollment honors `?returnTo=/terminal`; playground execute is SchemaForm + `catalogClient` (`resolveCatalogOp`). **Tunnel Analytics** (`/analytics?tab=&range=`) is a controller + four tab views (`OverviewTab` / `ToolsTrafficTab` / `AskTurnsTab` / `ErrorsHealthTab`) over shadcn `ChartContainer` + Recharts 3 (`McpGraphChart` dual Y-axis, `PluginStackedChart` stacked area); live KPIs merge in `overlay.ts`, buckets flatten in `series.ts`.

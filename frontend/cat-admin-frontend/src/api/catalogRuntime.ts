@@ -83,11 +83,10 @@ export function invalidateCatalogClient(): void {
  * Call a catalog operation by (plugin_id, operation_id).
  * Loads the catalog on first use. Prefers HTTP exposure paths from the snapshot.
  *
- * A snapshot miss (`CatalogClient.call` throws "Unknown catalog operation")
- * refreshes the live catalog once and retries — covers a stale/filtered
- * client (e.g. a scope change) without ever falling back to the blind
- * `/execute` POST, which is guaranteed 501 for host console ops (see
- * `createCatalogClient.ts` / `inferenceClient.ts`).
+ * Snapshot misses refresh-once inside `CatalogClient.call` (peek the live
+ * module snapshot, then re-fetch) so playground / `useCatalogClient().op`
+ * get the same retry as typed `catalogClient` namespaces. Never falls back
+ * to a blind `/execute` POST — host console ops are 501 there.
  */
 export async function callCatalogOp<T = unknown>(
   pluginId: string,
@@ -95,16 +94,7 @@ export async function callCatalogOp<T = unknown>(
   args: Record<string, unknown> = {},
 ): Promise<T> {
   const client = await ensureCatalogClient()
-  try {
-    return (await client.call(pluginId, operationId, args)) as T
-  } catch (err) {
-    if (!(err instanceof Error) || !err.message.startsWith("Unknown catalog operation")) {
-      throw err
-    }
-    invalidateCatalogClient()
-    const fresh = await ensureCatalogClient()
-    return (await fresh.call(pluginId, operationId, args)) as T
-  }
+  return (await client.call(pluginId, operationId, args)) as T
 }
 
 /**
