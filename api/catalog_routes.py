@@ -12,8 +12,8 @@ POST   /api/catalog/session_gated/execute      — Validate args and invoke (plu
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -21,6 +21,7 @@ from starlette.responses import JSONResponse, Response
 from core.context import http_route_registry
 from core.http_route_registry import AuthPolicy
 from core.route_registry.operation_catalog import get_operation_catalog
+from core.route_registry.operation_descriptor import OperationDescriptor
 
 logger = logging.getLogger("whiskers_agent")
 
@@ -58,6 +59,48 @@ def _match_etag(request: Request, etag: str) -> bool:
     return etag in candidates or etag.strip('"') in {c.strip('"') for c in candidates}
 
 
+def _view_etag(
+    kind: str,
+    revision: int,
+    ops: list[OperationDescriptor],
+    plugin_id: str | None,
+    slot: str | None = None,
+) -> str:
+    """ETag for one filtered catalog representation, not the global catalog hash.
+
+    Scopes, ``plugin_id``, and ``slot`` change which ops are returned; a 304
+    decided from ``catalog.etag`` before those filters would collapse distinct
+    views into one validator.
+    """
+    parts = [kind, str(revision), plugin_id or "", slot or ""]
+    parts.extend(sorted(op.descriptor_hash for op in ops))
+    digest = hashlib.sha256(":".join(parts).encode("utf-8")).hexdigest()
+    return f'"{digest}"'
+
+
+def _not_modified(etag: str) -> Response:
+    """Empty 304 that still forbids storing a body (same as the 200 path)."""
+    return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-store"})
+
+
+async def _filtered_catalog_ops(
+    request: Request,
+    *,
+    apply_slot: bool,
+) -> tuple[list[OperationDescriptor], str | None, str | None, int]:
+    """Scope- and query-filter the live catalog, then return (ops, plugin_id, slot, revision)."""
+    catalog = get_operation_catalog()
+    caller_scopes = await _resolve_caller_scopes(request)
+    ops = catalog.filter_for_caller(caller_scopes)
+    plugin_id = request.query_params.get("plugin_id")
+    slot = request.query_params.get("slot") if apply_slot else None
+    if plugin_id:
+        ops = [o for o in ops if o.plugin_id == plugin_id]
+    if slot:
+        ops = [o for o in ops if o.ui is not None and o.ui.slot == slot]
+    return ops, plugin_id, slot, catalog.revision
+
+
 @http_route_registry.route(
     route="catalog",
     endpoint="",
@@ -68,23 +111,13 @@ def _match_etag(request: Request, etag: str) -> bool:
 )
 async def api_catalog_list(request: Request) -> Response:
     """Return versioned, entitlement-filtered live operation catalog."""
-    catalog = get_operation_catalog()
-    etag = catalog.etag
+    ops, plugin_id, slot, revision = await _filtered_catalog_ops(request, apply_slot=True)
+    etag = _view_etag("list", revision, ops, plugin_id, slot)
     if _match_etag(request, etag):
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-store"})
-
-    caller_scopes = await _resolve_caller_scopes(request)
-    ops = catalog.filter_for_caller(caller_scopes)
-
-    plugin_id = request.query_params.get("plugin_id")
-    slot = request.query_params.get("slot")
-    if plugin_id:
-        ops = [o for o in ops if o.plugin_id == plugin_id]
-    if slot:
-        ops = [o for o in ops if o.ui is not None and o.ui.slot == slot]
+        return _not_modified(etag)
 
     body = {
-        "revision": catalog.revision,
+        "revision": revision,
         "etag": etag,
         "operations": [o.to_catalog_dict() for o in ops],
     }
@@ -107,17 +140,10 @@ async def api_catalog_list(request: Request) -> Response:
 )
 async def api_catalog_openapi(request: Request) -> Response:
     """Return entitlement-filtered OpenAPI 3.0 doc for HTTP-exposed catalog ops."""
-    catalog = get_operation_catalog()
-    etag = catalog.etag
+    ops, plugin_id, _slot, revision = await _filtered_catalog_ops(request, apply_slot=False)
+    etag = _view_etag("openapi", revision, ops, plugin_id)
     if _match_etag(request, etag):
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-store"})
-
-    caller_scopes = await _resolve_caller_scopes(request)
-    ops = catalog.filter_for_caller(caller_scopes)
-
-    plugin_id = request.query_params.get("plugin_id")
-    if plugin_id:
-        ops = [o for o in ops if o.plugin_id == plugin_id]
+        return _not_modified(etag)
 
     from core.route_registry.openapi_export import build_openapi_from_ops
 

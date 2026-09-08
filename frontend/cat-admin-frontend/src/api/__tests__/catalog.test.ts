@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createInferenceClient } from "../inferenceClient"
-import { getCatalogOpenApi } from "../catalog"
+import { getCatalog, getCatalogOpenApi } from "../catalog"
 import type { CatalogOperation } from "../catalog"
 
 const sampleOp = (over: Partial<CatalogOperation> = {}): CatalogOperation => ({
@@ -54,6 +54,31 @@ describe("createInferenceClient", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(String(url)).toContain("/api/catalog/session_gated/execute")
     expect(init.method).toBe("POST")
+  })
+})
+
+describe("getCatalog", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("maps a real 304 to null (reuse prior snapshot, never empty)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 304 }))
+    await expect(getCatalog()).resolves.toBeNull()
+  })
+
+  it("sends cache: no-store so the browser cannot inject a silent revalidation", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ revision: 1, etag: '"v1"', operations: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+    await getCatalog()
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "/api/catalog/session_gated",
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    )
   })
 })
 
