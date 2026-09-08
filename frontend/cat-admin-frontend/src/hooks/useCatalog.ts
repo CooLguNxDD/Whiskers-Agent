@@ -5,7 +5,7 @@
 import { useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { getCatalog, type CatalogResponse } from "@/api/catalog"
-import { setCatalogSnapshot } from "@/api/catalogRuntime"
+import { getCatalogOperations, setCatalogSnapshot } from "@/api/catalogRuntime"
 import {
   createCatalogClient,
   type CatalogClient,
@@ -28,8 +28,10 @@ export function useCatalogQuery(opts?: { pluginId?: string; slot?: string }) {
         pluginId: opts?.pluginId,
         slot: opts?.slot,
       })
-      // 304 → null should not happen on first load without etag; treat as empty
-      const snap = data ?? { revision: 0, etag: "", operations: [] }
+      // 304 → null means "reuse the prior snapshot", not "empty" — a
+      // revalidation the caller never asked for must not blank the console
+      // mid-session (see api/catalog.ts::getCatalog doc).
+      const snap = data ?? { revision: 0, etag: "", operations: getCatalogOperations() }
       // Single sync point for module-level API clients (no useEffect mirror).
       if (!opts?.pluginId && !opts?.slot && data) {
         setCatalogSnapshot(data)

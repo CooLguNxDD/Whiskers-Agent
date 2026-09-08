@@ -4,7 +4,6 @@
 
 import type { CatalogOperation } from "../catalog"
 import { createInferenceClient, invokeCatalogOperation } from "../inferenceClient"
-import { executeOperation } from "../catalog"
 
 /** Bound caller returned by `CatalogClient.op`. */
 export type BoundOpCaller = (args?: Record<string, unknown>) => Promise<unknown>
@@ -42,12 +41,15 @@ export function createCatalogClient(operations: CatalogOperation[]): CatalogClie
     call: async (pluginId, operationId, args = {}) => {
       const op = ops.get(opKey(pluginId, operationId))
       if (op) return invokeCatalogOperation(op, args)
-      // Op missing from snapshot (stale filter) — server execute still works
-      const res = await executeOperation(pluginId, operationId, args)
-      if (res && typeof res === "object" && "result" in res) {
-        return (res as { result: unknown }).result
-      }
-      return res
+      // Op missing from this snapshot. Host console ops are mirrored with
+      // is_fast_path=False (core/route_registry/host_catalog.py), so a
+      // blind POST /execute is guaranteed 501 for exactly the ops this
+      // client serves — fail with a diagnosable error instead. Callers that
+      // want retry-on-miss should go through `callCatalogOp`
+      // (catalogRuntime.ts), which re-fetches the live snapshot first.
+      throw new Error(
+        `Unknown catalog operation ${pluginId}/${operationId} (missing from this snapshot)`,
+      )
     },
     op(pluginId, operationId) {
       return (args = {}) => {

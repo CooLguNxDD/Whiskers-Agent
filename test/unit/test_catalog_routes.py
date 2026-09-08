@@ -108,6 +108,10 @@ async def test_catalog_list_returns_revision_and_ops() -> None:
     assert len(data["operations"]) == 1
     assert data["operations"][0]["operation_id"] == "p1__op"
     assert res.headers.get("etag") or res.headers.get("ETag")
+    # no-store (not "private, no-cache") — a browser-level silent revalidation
+    # collapses the FE's live snapshot into a phantom 304 with no cached body
+    # (see api/catalog.ts::getCatalog / api/catalogRuntime.ts::ensureCatalogClient).
+    assert res.headers.get("cache-control") == "no-store"
 
 
 @pytest.mark.asyncio
@@ -189,6 +193,7 @@ async def test_catalog_openapi_returns_http_paths() -> None:
     assert "/things" in doc["paths"]
     assert doc["paths"]["/things"]["get"]["operationId"] == "p1__list"
     assert res.headers.get("etag") or res.headers.get("ETag")
+    assert res.headers.get("cache-control") == "no-store"
 
 
 @pytest.mark.asyncio
