@@ -72,7 +72,7 @@ if (-not $SkipDeps) {
     }
 
     if ($usedUv) {
-        uv venv .venv --python 3.11
+        uv venv --allow-existing .venv --python 3.11
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         uv pip install -r requirements.txt
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
