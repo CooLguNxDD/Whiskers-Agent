@@ -1,0 +1,7 @@
+{
+    "tier": "pro",
+    "plugins": [
+        "plugins.cat_terminal_relay_plugin",
+        "plugins.portfolio_plugin"
+    ]
+}

@@ -1,0 +1,21 @@
+{
+  "_comment": "Level-1 core-platform scope vocabulary. Loaded into PermissionRegistry under the reserved plugin id \"core\" (validate_scope_token rejects `core:` for any other plugin id). Mirrors core_graph/model_roles/defaults/core_roles.json's role as a data-declared default.",
+  "scopes": [
+    {"token": "core:whiskers.console:read", "description": "Console login + session read (admin UI access)."},
+    {"token": "core:whiskers.console:write", "description": "Console session mutation."},
+    {"token": "core:whiskers.plugins:read", "description": "List/detail installed plugins."},
+    {"token": "core:whiskers.plugins:write", "description": "Enable/disable/hot-swap plugins."},
+    {"token": "core:whiskers.proxy:read", "description": "List mounted proxies."},
+    {"token": "core:whiskers.proxy:write", "description": "Mount/unmount proxies."},
+    {"token": "core:whiskers.analytics:read", "description": "Telemetry, KPIs, analytics WS stream."},
+    {"token": "core:graph:read", "description": "discover_tools / catalog read."},
+    {"token": "core:graph:write", "description": "run_graph execution."},
+    {"token": "core:config:read", "description": "Read server config, model roles, step policy, gates."},
+    {"token": "core:config:write", "description": "Write server config, model roles, step policy, gates."},
+    {"token": "core:apikey:read", "description": "List API keys."},
+    {"token": "core:apikey:write", "description": "Create/revoke/rotate API keys and presets."},
+    {"token": "core:terminal:read", "description": "Terminal relay read/host access (replaces terminal:host)."},
+    {"token": "core:terminal:write", "description": "Terminal relay exec access (replaces terminal:use)."},
+    {"token": "core:terminal.sandbox:write", "description": "Execute sandboxed terminal commands (replaces terminal:use for sandbox tools)."}
+  ]
+}

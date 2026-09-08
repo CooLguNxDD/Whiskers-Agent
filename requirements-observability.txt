@@ -1,0 +1,15 @@
+# Optional LLM/graph tracing lane (Phase 3 of the telemetry plan — see
+# .claude/skills/analytics-telemetry/SKILL.md). NOT installed by default:
+#   pip install -r requirements.txt -r requirements-observability.txt
+#
+# Product telemetry (tool_call_events / graph_run_events / portfolio_ask_turns)
+# never depends on any of this — it is Postgres + the in-memory collector only.
+# This lane only feeds an optional Arize Phoenix container for LLM/graph
+# span waterfalls; core/telemetry/otel_setup.py's init_telemetry() is a no-op
+# unless OTEL_EXPORTER_OTLP_ENDPOINT is set, so these imports are lazy and the
+# server boots clean without this file installed.
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-instrumentation-starlette>=0.46b0
+opentelemetry-exporter-otlp-proto-http>=1.25.0
+openinference-instrumentation-langchain>=0.1.0

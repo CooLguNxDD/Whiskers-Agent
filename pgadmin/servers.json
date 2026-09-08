@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "whiskers_agent_db",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "whiskers_agent_mcp",
+      "Username": "whiskers",
+      "Password": "whiskers",
+      "SSLMode": "prefer"
+    }
+  }
+}

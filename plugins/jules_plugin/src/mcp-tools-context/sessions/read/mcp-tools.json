@@ -1,0 +1,70 @@
+[
+  {
+    "name": "list_sessions",
+    "description": "List Sessions",
+    "inputSchema": {
+      "properties": {
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagesize"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagetoken"
+        }
+      },
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ListSessions",
+      "method": "GET",
+      "path": "/v1alpha/sessions",
+      "tags": [],
+      "security": [],
+      "query": [
+        "pageSize",
+        "pageToken"
+      ]
+    }
+  },
+  {
+    "name": "get_session",
+    "description": "Get a Session",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "GetSession",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  }
+]

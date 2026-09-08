@@ -1,0 +1,280 @@
+{
+  "flow_id": "career_ops_apply_v1",
+  "name": "Career-Ops Apply Pipeline",
+  "claims": {
+    "goal_classes": [],
+    "any_keywords": [
+      "apply to this job",
+      "job posting",
+      "tailor my resume",
+      "job application",
+      "apply for this role",
+      "career-ops",
+      "career ops"
+    ],
+    "deny_keywords": [
+      "portfolio layout",
+      "fish tank",
+      "redesign",
+      "genui",
+      "tell me about",
+      "redesign my portfolio"
+    ]
+  },
+  "requires": [],
+  "provides": [
+    "did:tailor_resume",
+    "have:portfolio_short_id",
+    "did:track_application"
+  ],
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {
+        "type": "string"
+      },
+      "applicant_profile_id": {
+        "type": "integer"
+      },
+      "url": {
+        "type": "string"
+      },
+      "raw_text": {
+        "type": "string"
+      },
+      "theme": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "goal",
+      "applicant_profile_id"
+    ]
+  },
+  "stages": [
+    {
+      "id": "ingest",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__fetch_job_posting",
+      "reads": [
+        "url",
+        "raw_text"
+      ],
+      "writes": [
+        "clean_description",
+        "title",
+        "company",
+        "location",
+        "job_id",
+        "provider",
+        "source_url",
+        "compensation",
+        "job_type",
+        "posting_entity",
+        "via",
+        "end_employer",
+        "employment_class",
+        "needs_browser_scrape",
+        "ingest_status"
+      ],
+      "required_outputs": [
+        "clean_description"
+      ],
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "signals",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__resolve_pipeline_signals",
+      "reads": [
+        "goal",
+        "title",
+        "company",
+        "clean_description",
+        "source_url",
+        "job_id",
+        "via",
+        "posting_entity",
+        "end_employer",
+        "employment_class",
+        "location",
+        "needs_browser_scrape",
+        "ingest_status"
+      ],
+      "writes": [
+        "company",
+        "role",
+        "job_description",
+        "offer_text",
+        "posting_url",
+        "job_id",
+        "url",
+        "role_title",
+        "via",
+        "posting_entity",
+        "end_employer",
+        "employment_class",
+        "location",
+        "needs_browser_scrape",
+        "ingest_status"
+      ],
+      "required_outputs": [
+        "company",
+        "role",
+        "job_description"
+      ],
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "liveness",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__check_job_liveness",
+      "reads": [
+        "url",
+        "company",
+        "role_title"
+      ],
+      "writes": [
+        "is_live",
+        "is_potential_ghost_job",
+        "legitimacy_tier",
+        "ghost_reasons"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
+      "id": "fit",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__evaluate_offer_fit",
+      "reads": [
+        "applicant_profile_id",
+        "offer_text"
+      ],
+      "writes": [
+        "verdict",
+        "hybrid_used"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
+      "id": "bake",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__bake_portfolio_for_job",
+      "reads": [
+        "job_description",
+        "company",
+        "role",
+        "posting_url",
+        "theme"
+      ],
+      "writes": [
+        "short_id",
+        "portfolio_job_id",
+        "query_param",
+        "quality",
+        "degraded"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
+      "id": "links",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__prepare_application_record",
+      "reads": [
+        "portfolio_job_id",
+        "job_id",
+        "company",
+        "role",
+        "verdict",
+        "via",
+        "end_employer",
+        "employment_class"
+      ],
+      "writes": [
+        "portfolio_url",
+        "job_id",
+        "application_status",
+        "notes"
+      ],
+      "required_outputs": [
+        "application_status"
+      ],
+      "on_fail": "continue"
+    },
+    {
+      "id": "resume",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__tailor_resume",
+      "reads": [
+        "applicant_profile_id",
+        "job_description",
+        "company",
+        "role",
+        "job_id"
+      ],
+      "writes": [
+        "tailored_text",
+        "kind"
+      ],
+      "required_outputs": [
+        "tailored_text"
+      ],
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "resume_pdf",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__render_resume_pdf",
+      "reads": [
+        "applicant_profile_id",
+        "tailored_text",
+        "kind",
+        "job_id",
+        "portfolio_job_id"
+      ],
+      "writes": [
+        "object_key",
+        "presigned_url"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
+      "id": "cover",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__tailor_cover_letter",
+      "reads": [
+        "applicant_profile_id",
+        "job_description",
+        "job_id",
+        "portfolio_url"
+      ],
+      "writes": [
+        "cover_letter_text"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
+      "id": "track",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__sync_application_status",
+      "reads": [
+        "applicant_profile_id",
+        "job_id",
+        "application_status",
+        "notes",
+        "portfolio_job_id"
+      ],
+      "writes": [
+        "application",
+        "created"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    }
+  ]
+}

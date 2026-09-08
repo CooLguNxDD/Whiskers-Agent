@@ -1,0 +1,157 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+/* Theme color tokens come from ThemeProvider + themes/*.theme.json (injected on :root).
+   ct-theme.css holds FOUC fallbacks + component styles. globals.css = Tailwind bridges only. */
+@import "./globals.css";
+@import "./ct-theme.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --text: var(--fg-muted);
+  --text-h: var(--fg);
+  --code-bg: var(--bg-sunken);
+  --accent: var(--card-soft);
+  --accent-bg: color-mix(in oklch, var(--amber) 10%, transparent);
+  --accent-border: color-mix(in oklch, var(--amber) 50%, transparent);
+  --social-bg: color-mix(in oklch, var(--card) 60%, transparent);
+  --shadow: var(--shadow-card);
+
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  font: 18px/145% var(--sans);
+  letter-spacing: 0.18px;
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  @media (max-width: 1024px) {
+    font-size: 16px;
+  }
+
+  /* shadcn bridges — map ThemeProvider/ct-theme tokens into shadcn names */
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--card);
+  --card-foreground: var(--fg);
+  --popover: var(--bg-elevated);
+  --popover-foreground: var(--fg);
+  --primary: var(--amber);
+  --primary-foreground: var(--bg);
+  --secondary: var(--card-soft);
+  --secondary-foreground: var(--fg);
+  --muted: var(--bg-sunken);
+  --muted-foreground: var(--fg-muted);
+  --accent-foreground: var(--fg);
+  --destructive: var(--danger);
+  --input: var(--border);
+  --ring: var(--border-strong);
+  --chart-1: var(--amber);
+  --chart-2: var(--pink);
+  --chart-3: var(--neon);
+  --chart-4: var(--cyan);
+  --chart-5: var(--accent-violet);
+  --radius: 0.625rem;
+  --sidebar: var(--bg-elevated);
+  --sidebar-foreground: var(--fg);
+  --sidebar-primary: var(--amber);
+  --sidebar-primary-foreground: var(--bg);
+  --sidebar-accent: var(--card-soft);
+  --sidebar-accent-foreground: var(--fg);
+  --sidebar-border: var(--hairline);
+  --sidebar-ring: var(--border-strong);
+}
+
+#root {
+  width: 1126px;
+  max-width: 100%;
+  margin: 0 auto;
+  text-align: center;
+  border-inline: 1px solid var(--border);
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* Admin panel + auth pages take full viewport */
+#root:has(.ct-app),
+#root:has(.ct-login) {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  border: none;
+  text-align: initial;
+  min-height: 0;
+}
+
+html:has(.ct-app),
+body:has(.ct-app),
+html:has(.ct-login),
+body:has(.ct-login) {
+  height: 100%;
+  overflow: hidden;
+}
+
+.ct-app,
+.ct-login {
+  height: 100vh;
+  width: 100vw;
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2 {
+  font-family: var(--heading);
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+h1 {
+  font-size: 56px;
+  letter-spacing: -1.68px;
+  margin: 32px 0;
+  @media (max-width: 1024px) {
+    font-size: 36px;
+    margin: 20px 0;
+  }
+}
+h2 {
+  font-size: 24px;
+  line-height: 118%;
+  letter-spacing: -0.24px;
+  margin: 0 0 8px;
+  @media (max-width: 1024px) {
+    font-size: 20px;
+  }
+}
+p {
+  margin: 0;
+}
+
+code,
+.counter {
+  font-family: var(--mono);
+  display: inline-flex;
+  border-radius: 4px;
+  color: var(--text-h);
+}
+
+code {
+  font-size: 15px;
+  line-height: 135%;
+  padding: 4px 8px;
+  background: var(--code-bg);
+}

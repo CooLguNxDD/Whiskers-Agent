@@ -1,0 +1,7 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Keep local versions of these files/folders during merges
+plugin_config.json     merge=ours
+plugins/**             merge=ours
+plugins/core_mcp_plugin/**  merge

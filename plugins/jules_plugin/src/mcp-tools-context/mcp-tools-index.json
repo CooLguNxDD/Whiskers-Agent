@@ -1,0 +1,51 @@
+{
+  "total_tools": 10,
+  "structure": {
+    "activities": {
+      "read": {
+        "file": "activities/read/mcp-tools.json",
+        "tool_count": 2,
+        "tools": [
+          "ListActivities",
+          "GetActivity"
+        ]
+      }
+    },
+    "sessions": {
+      "delete": {
+        "file": "sessions/delete/mcp-tools.json",
+        "tool_count": 1,
+        "tools": [
+          "DeleteSession"
+        ]
+      },
+      "read": {
+        "file": "sessions/read/mcp-tools.json",
+        "tool_count": 2,
+        "tools": [
+          "ListSessions",
+          "GetSession"
+        ]
+      },
+      "write_update": {
+        "file": "sessions/write_update/mcp-tools.json",
+        "tool_count": 3,
+        "tools": [
+          "CreateSession",
+          "ApprovePlan",
+          "SendMessage"
+        ]
+      }
+    },
+    "sources": {
+      "read": {
+        "file": "sources/read/mcp-tools.json",
+        "tool_count": 2,
+        "tools": [
+          "ListSources",
+          "GetSource"
+        ]
+      }
+    }
+  }
+}

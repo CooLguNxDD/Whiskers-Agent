@@ -1,0 +1,73 @@
+{
+  "name": "whiskers-vscode",
+  "displayName": "Whiskers Agent Terminal Host",
+  "description": "Hosts a remote interactive terminal PTY on your machine and relays it to the Whiskers Agent operator console. STUB — Phase 1 scaffold, not yet wired end-to-end.",
+  "version": "0.0.3",
+  "publisher": "whiskers-studios",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "whiskersAgent.connect", "title": "Whiskers Agent: Connect host" },
+      { "command": "whiskersAgent.disconnect", "title": "Whiskers Agent: Disconnect host" },
+      { "command": "whiskersAgent.forceConnect", "title": "Whiskers Agent: Force Connect host" }
+    ],
+    "configuration": {
+      "title": "Whiskers Agent",
+      "properties": {
+        "whiskersAgent.tunnelUrl": {
+          "type": "string",
+          "default": "ws://localhost:10000",
+          "description": "Whiskers Agent relay base URL."
+        },
+        "whiskersAgent.token": {
+          "type": "string",
+          "default": "dev:admin:terminal:host",
+          "description": "JWT carrying terminal:host scope or dev authentication string."
+        },
+        "whiskersAgent.ideId": {
+          "type": "string",
+          "default": "",
+          "description": "Stable host id this extension registers under."
+        },
+        "whiskersAgent.allowedBinaries": {
+          "type": "array",
+          "default": ["claude", "git", "npm", "npx", "node", "python", "python3", "ls", "cat", "echo", "pwd", "which", "cd"],
+          "description": "Allowlist of binaries this host may run. EMPTY = nothing allowed."
+        },
+        "whiskersAgent.rawModeBinaries": {
+          "type": "array",
+          "default": ["claude", "codex", "agy", "gemini"],
+          "description": "Binaries that trigger rawMode on launch."
+        },
+        "whiskersAgent.idleTtlSeconds": {
+          "type": "number",
+          "default": 900,
+          "description": "Kill the PTY after this many idle seconds."
+        },
+        "whiskersAgent.stepUpMethod": {
+          "type": "string",
+          "enum": ["totp", "password", "both"],
+          "default": "totp",
+          "description": "Which step-up factor the Console should prompt for. The relay is the real enforcer."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "typecheck": "tsc --noEmit -p ./"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.4.0"
+  }
+}

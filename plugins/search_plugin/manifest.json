@@ -1,0 +1,33 @@
+{
+  "name": "search_plugin",
+  "version": "1.1.0",
+  "tier": "free",
+  "description": "Web search, URL fetch, and semantic content search for the OCT agent.",
+  "author": "Whiskers Agent",
+  "requires": [],
+  "capabilities": ["web_search", "content_search"],
+  "scopes": [
+    {"token": "plugin:search_plugin", "description": "Full access to search tools"},
+    {"token": "group:search_plugin:read", "description": "Web search and semantic query tools"},
+    {"token": "group:search_plugin:write", "description": "Semantic indexing tools"}
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "required_credentials": [],
+  "optional_credentials": ["TAVILY_API_KEY", "BRAVE_SEARCH_API_KEY"],
+  "memory": [
+    {
+      "name": "default",
+      "backend": "search",
+      "description": "Default semantic search index namespace (search_content_vectors)",
+      "writable": true
+    }
+  ],
+  "skills": ["skills/web-search.md"],
+  "schema": {
+    "migrations_path": "migrations",
+    "min_core_revision": "core_040",
+    "auto_migrate": true
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "job_search_plugin",
+  "version": "1.7.0",
+  "tier": "free",
+  "description": "Job search, resume/cover-letter enrichment, offer-fit evaluation, and application tracking. Pairs with OpenClaw for browser-hands fallback.",
+  "author": "Whiskers Agent",
+  "requires": [],
+  "capabilities": ["job_search", "resume_enrich", "offer_eval", "application_tracking"],
+  "scopes": [
+    {"token": "plugin:job_search_plugin", "description": "Full access to job search tools"},
+    {"token": "group:job_search_plugin:read", "description": "Search jobs and view applications"},
+    {"token": "group:job_search_plugin:write", "description": "Apply and track job applications"},
+    {"token": "group:job_search_plugin:profile", "description": "Read token-budgeted applicant profile summaries and proof points"},
+    {"token": "group:job_search_plugin:application", "description": "Sync application lifecycle status (Career-Ops CLI integration)"},
+    {"token": "group:job_search_plugin:search", "description": "Search and fetch job postings (unified ATS ingestion)"},
+    {"token": "group:job_search_plugin:liveness", "description": "Verify posting liveness and ghost-job signals"},
+    {"token": "group:job_search_plugin:enrich", "description": "Tailor resume/cover letter and render PDFs, with optional portfolio auto-bake"},
+    {"token": "group:job_search_plugin:pipeline", "description": "Slot-bridging adapter ops used only by the career_ops_apply_v1 FlowSpec"}
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "optional_credentials": ["GREENHOUSE_API_KEY", "LEVER_API_KEY", "ADZUNA_APP_ID", "ADZUNA_APP_KEY"],
+  "skills": ["skills/job-search-pipeline/JOB_SEARCH_SKILL.md"],
+  "schema": {
+    "migrations_path": "migrations",
+    "min_core_revision": "core_040",
+    "auto_migrate": true
+  },
+  "settings": {
+    "apply_endpoints": {
+      "greenhouse": "https://api.greenhouse.io/v1/apply"
+    },
+    "specialist_agent": {
+      "enabled": true,
+      "domain": "job_search",
+      "tool_globs": ["job_search_plugin/*", "portfolio_plugin/*bake*", "search_plugin/*fetch_url*"],
+      "delegation": "domain_pipeline",
+      "comment": "career_ops_apply_v1 chains ingest/fit/bake/tailor/track into one dispatchable flow for the Career-Ops CLI agent.",
+      "flow_specs": ["flow_specs/career_ops_apply_v1.json"]
+    }
+  }
+}

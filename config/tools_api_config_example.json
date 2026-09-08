@@ -1,0 +1,65 @@
+{
+  "settings": {
+    "base64_min_len": 128
+  },
+  "_comment_hints": "Optional top-level 'hints' block overrides the core-owned _response_shape prompt text (utils/response_shape_hints.py::DEFAULT_SHAPE_HINT/DEFAULT_FORMAT_HINT) injected into the FastMCP server instructions and per-tool descriptions across every stack. Omitted here (and in the CI-scaffolded copy of this file) so the built-in text stays live — it's rendered straight from the shaping pipeline's own vocabulary and kept in sync by test/unit/test_response_shape_hints.py. Add \"hints\": {\"shape_hint\": [...], \"format_hint\": [...]} only when you actually want to override it.",
+  "endpoint_meta": {
+    "_base": {
+      "paginated": false,
+      "default_page_size": 20,
+      "default_response_format": "csv",
+      "include_meta": true
+    },
+    "ListSessions": { "default_response_format": "json" },
+    "ListActivities": { "default_response_format": "json" },
+    "GetActivity": { "default_response_format": "json" }
+  },
+  "response_shapes": {
+    "_comment": "Per-operationId overrides merged on top of 'base' (utils/response_shape.py::_apply_response_shape). Set \"passthrough\": true on an op to skip normalize/strip/dedupe/project/limit/format/include_meta entirely while still running offload_minio — for tools whose result is a structured payload (e.g. a UI layout dict) that must never be reshaped, only offloaded when oversized.",
+    "base": {
+      "limit": 20,
+      "strip_keys": [
+        "queueId", "retryCount", "externalId",
+        "editedBy", "templateOptions",
+        "displayIfSelected", "expressionProperties"
+      ],
+      "strip_hex": true,
+      "strip_empty": true,
+      "offload_minio": true
+    },
+    "ListSessions": {
+      "project": {
+        "id": true,
+        "name": true,
+        "title": true,
+        "createTime": true,
+        "updateTime": true,
+        "state": true,
+        "url": true
+      },
+      "strip_hex": true
+    },
+    "GetSession": {
+      "project": {
+        "id": true,
+        "name": true,
+        "title": true,
+        "createTime": true,
+        "updateTime": true,
+        "state": true,
+        "url": true
+      },
+      "strip_hex": true
+    },
+    "ListActivities": {
+      "limit": 20,
+      "strip_keys": ["unidiffPatch", "data"],
+      "strip_hex": true,
+      "strip_empty": true
+    },
+    "GetActivity": {
+      "strip_hex": true,
+      "strip_keys": ["data"]
+    }
+  }
+}
