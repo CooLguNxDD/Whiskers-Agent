@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { createCatalogClient } from "../generated/createCatalogClient"
+import { invalidateCatalogClient } from "../catalogRuntime"
 import type { CatalogOperation } from "../catalog"
 
 const sampleOp = (over: Partial<CatalogOperation> = {}): CatalogOperation => ({
@@ -28,9 +29,17 @@ const sampleOp = (over: Partial<CatalogOperation> = {}): CatalogOperation => ({
   ...over,
 })
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  })
+}
+
 describe("createCatalogClient", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    invalidateCatalogClient()
   })
 
   it("exposes operations in ops map keyed by plugin_id::operation_id", () => {
@@ -102,5 +111,76 @@ describe("createCatalogClient", () => {
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit]
     expect(String(url)).toBe("/api/plugins/session_gated/demo/enable")
     expect(init.method).toBe("POST")
+  })
+
+  it("call() refreshes once on a snapshot miss instead of POSTing /execute", async () => {
+    const hostOp = sampleOp({
+      plugin_id: "api.plugins",
+      operation_id: "api_list_plugins",
+      is_fast_path: false,
+      mcp: null,
+      http: {
+        method: "GET",
+        path_template: "/api/plugins/session_gated",
+        auth_policy: "session_gated",
+      },
+    })
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input)
+      if (url.includes("/api/catalog/session_gated") && !url.includes("/execute")) {
+        return Promise.resolve(
+          jsonResponse({ revision: 2, etag: '"v2"', operations: [hostOp] }),
+        )
+      }
+      if (url.includes("/api/plugins/session_gated")) {
+        return Promise.resolve(jsonResponse({ plugins: [] }))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+
+    const client = createCatalogClient([])
+    const result = await client.call("api.plugins", "api_list_plugins")
+    expect(result).toEqual({ plugins: [] })
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes("/execute"))).toHaveLength(0)
+  })
+
+  it("op() uses the same refresh-once miss path as call()", async () => {
+    const hostOp = sampleOp({
+      plugin_id: "api.plugins",
+      operation_id: "api_list_plugins",
+      is_fast_path: false,
+      mcp: null,
+      http: {
+        method: "GET",
+        path_template: "/api/plugins/session_gated",
+        auth_policy: "session_gated",
+      },
+    })
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input)
+      if (url.includes("/api/catalog/session_gated") && !url.includes("/execute")) {
+        return Promise.resolve(
+          jsonResponse({ revision: 2, etag: '"v2"', operations: [hostOp] }),
+        )
+      }
+      if (url.includes("/api/plugins/session_gated")) {
+        return Promise.resolve(jsonResponse({ plugins: [] }))
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`))
+    })
+
+    const client = createCatalogClient([])
+    const result = await client.op("api.plugins", "api_list_plugins")()
+    expect(result).toEqual({ plugins: [] })
+  })
+
+  it("call() still throws a named error when the op is unknown after a refresh", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ revision: 2, etag: '"v2"', operations: [] }),
+    )
+    const client = createCatalogClient([])
+    await expect(client.call("api.plugins", "api_list_plugins")).rejects.toThrow(
+      /Unknown catalog operation/,
+    )
   })
 })
