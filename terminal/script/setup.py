@@ -726,10 +726,13 @@ def run_admin(args=None) -> int:
         print(f"error: could not check for existing admin account: {exc}", file=sys.stderr)
         return 1
 
-    if already_exists:
+    if already_exists and not getattr(args, "force", False):
         if not non_interactive:
-            print("  admin account already exists; skipping creation")
-        return 0
+            choice = input("  admin account already exists. Reset credentials? [y/N]: ").strip().lower()
+            if choice not in ("y", "yes"):
+                return 0
+        else:
+            return 0
 
     admin_username = os.environ.get("ADMIN_USERNAME", "").strip()
     admin_password = os.environ.get("ADMIN_PASSWORD", "").strip()

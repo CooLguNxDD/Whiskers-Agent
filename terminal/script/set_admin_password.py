@@ -42,13 +42,30 @@ async def set_admin_password(password: str, username: str = "admin") -> None:
     await vault.set("admin", "username", username.strip())
     await vault.set("admin", "password_hash", hashed)
 
+    # Synchronize to users table
+    try:
+        from core.user_management import get_user_by_username, update_user_password, create_user
+        existing = await get_user_by_username(username.strip())
+        if existing is not None:
+            await update_user_password(username.strip(), password)
+        else:
+            await create_user(username.strip(), password, role="master", tenant_id=1)
+    except Exception as exc:
+        import logging
+        logging.getLogger("whiskers").warning("Failed to sync admin user to users table: %s", exc)
+
 
 async def main() -> None:
-    """Interactive CLI entrypoint: skip if an admin already exists, otherwise
-    prompt for a username/password (with confirmation) and bootstrap it into
-    the Vault. Exits non-zero if required env vars are missing or the
-    passwords don't match."""
+    """CLI entrypoint: prompt for a username/password (with confirmation)
+    and bootstrap or reset it into the Vault and users table."""
+    import argparse
     from dotenv import load_dotenv
+
+    parser = argparse.ArgumentParser(description="Set or reset admin console credentials.")
+    parser.add_argument("-f", "--force", "-r", "--reset", action="store_true", dest="force", help="reset existing credentials")
+    parser.add_argument("-u", "--username", help="Admin username")
+    parser.add_argument("-p", "--password", help="Admin password")
+    args = parser.parse_args()
 
     load_dotenv()
 
@@ -62,28 +79,37 @@ async def main() -> None:
         print("Error: MASTER_KEY is not set.", file=sys.stderr)
         sys.exit(1)
 
-    if await admin_account_exists():
-        print("Admin account already exists; not creating a new one.")
-        return
+    exists = await admin_account_exists()
+    if exists and not args.force:
+        if args.password:
+            print("Admin account already exists; pass --reset or --force to overwrite.", file=sys.stderr)
+            sys.exit(1)
+        reset = input("Admin account already exists. Would you like to reset the password? [y/N]: ").strip().lower()
+        if reset not in ("y", "yes"):
+            print("Aborted.")
+            return
 
-    admin_username = os.environ.get("ADMIN_USERNAME", "").strip()
+    admin_username = args.username or os.environ.get("ADMIN_USERNAME", "").strip()
     if not admin_username:
         admin_username = input("Admin username [admin]: ").strip()
         if not admin_username:
             admin_username = "admin"
 
-    password = getpass.getpass("Admin password: ")
-    if not password:
-        print("Error: password cannot be empty.", file=sys.stderr)
-        sys.exit(1)
+    if args.password:
+        password = args.password
+    else:
+        password = getpass.getpass("New admin password: ")
+        if not password:
+            print("Error: password cannot be empty.", file=sys.stderr)
+            sys.exit(1)
 
-    confirm = getpass.getpass("Confirm password: ")
-    if password != confirm:
-        print("Error: passwords do not match.", file=sys.stderr)
-        sys.exit(1)
+        confirm = getpass.getpass("Confirm password: ")
+        if password != confirm:
+            print("Error: passwords do not match.", file=sys.stderr)
+            sys.exit(1)
 
     await set_admin_password(password, admin_username)
-    print("Admin credentials set successfully.")
+    print(f"Admin credentials for '{admin_username}' set successfully.")
 
 
 if __name__ == "__main__":

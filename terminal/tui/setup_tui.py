@@ -1176,8 +1176,9 @@ async def _manage_tenant(console: Console, tenant: dict) -> None:
             )
         console.print(t)
 
-        choices = ["a", "b"]
+        choices = ["a", "r", "b"]
         console.print("  [bold]a[/bold]. Add user to this tenant")
+        console.print("  [bold]r[/bold]. Reset user password")
         console.print("  [bold]b[/bold]. Back")
         choice = Prompt.ask("Action", choices=choices, show_choices=False)
 
@@ -1200,6 +1201,33 @@ async def _manage_tenant(console: Console, tenant: dict) -> None:
                 console.print(f"[green]✓ User '{username}' created successfully.[/green]")
             except ValueError as exc:
                 console.print(f"[red]{exc}[/red]")
+        elif choice == "r":
+            if not users:
+                console.print("[dim]No users found in this tenant.[/dim]")
+                continue
+            user_choices = [str(i + 1) for i in range(len(users))] + ["c"]
+            console.print()
+            console.print("[bold]Select user to reset password:[/bold]")
+            for i, u in enumerate(users, 1):
+                console.print(f"  {i}. {u['username']} ({u['role']})")
+            console.print("  [bold]c[/bold]. Cancel")
+            uc = Prompt.ask("User", choices=user_choices, show_choices=False)
+            if uc == "c":
+                continue
+            target_user = users[int(uc) - 1]
+            console.print(f"Resetting password for [bold cyan]{target_user['username']}[/bold cyan]:")
+            new_pw = _prompt_password_confirm(console)
+            if new_pw is None:
+                continue
+            from core.user_management import update_user_password  # noqa: PLC0415
+            try:
+                ok = await update_user_password(target_user["username"], new_pw)
+                if ok:
+                    console.print(f"[green]✓ Password for '{target_user['username']}' updated successfully.[/green]")
+                else:
+                    console.print(f"[red]User '{target_user['username']}' not found.[/red]")
+            except Exception as exc:
+                console.print(f"[red]Failed to update password: {exc}[/red]")
 
 
 # ---------------------------------------------------------------------------

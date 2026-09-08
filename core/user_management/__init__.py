@@ -13,6 +13,8 @@ from core.user_management.store import (
     list_tenants,
     create_user,
     list_users,
+    update_user_password,
+    update_user_username,
 )
 
 __all__ = [
@@ -24,4 +26,6 @@ __all__ = [
     "list_tenants",
     "create_user",
     "list_users",
+    "update_user_password",
+    "update_user_username",
 ]
