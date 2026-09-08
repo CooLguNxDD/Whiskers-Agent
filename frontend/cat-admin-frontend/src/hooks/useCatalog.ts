@@ -3,9 +3,9 @@
  */
 
 import { useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getCatalog, type CatalogResponse } from "@/api/catalog"
-import { getCatalogOperations, setCatalogSnapshot } from "@/api/catalogRuntime"
+import { setCatalogSnapshot } from "@/api/catalogRuntime"
 import {
   createCatalogClient,
   type CatalogClient,
@@ -21,22 +21,27 @@ const EMPTY_OPERATIONS: CatalogResponse["operations"] = []
  */
 export function useCatalogQuery(opts?: { pluginId?: string; slot?: string }) {
   const enabled = useAuthedQueryEnabled()
+  const queryClient = useQueryClient()
+  const pluginId = opts?.pluginId
+  const slot = opts?.slot
+  const queryKey = ["catalog", pluginId ?? null, slot ?? null] as const
   return useQuery({
-    queryKey: ["catalog", opts?.pluginId ?? null, opts?.slot ?? null],
+    queryKey,
     queryFn: async (): Promise<CatalogResponse> => {
-      const data = await getCatalog({
-        pluginId: opts?.pluginId,
-        slot: opts?.slot,
-      })
-      // 304 → null means "reuse the prior snapshot", not "empty" — a
-      // revalidation the caller never asked for must not blank the console
-      // mid-session (see api/catalog.ts::getCatalog doc).
-      const snap = data ?? { revision: 0, etag: "", operations: getCatalogOperations() }
-      // Single sync point for module-level API clients (no useEffect mirror).
-      if (!opts?.pluginId && !opts?.slot && data) {
-        setCatalogSnapshot(data)
+      const data = await getCatalog({ pluginId, slot })
+      if (data) {
+        // Only the unfiltered shell query owns the module-level snapshot.
+        if (!pluginId && !slot) {
+          setCatalogSnapshot(data)
+        }
+        return data
       }
-      return snap
+      // 304: reuse *this query's* prior data. Never substitute the unfiltered
+      // runtime snapshot into a pluginId/slot query, and never succeed with
+      // an empty catalog on first load (see api/catalog.ts::getCatalog).
+      const cached = queryClient.getQueryData<CatalogResponse>(queryKey)
+      if (cached) return cached
+      throw new Error("Catalog snapshot unavailable (304 with no prior data)")
     },
     staleTime: 15_000,
     enabled,

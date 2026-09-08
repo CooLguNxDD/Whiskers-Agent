@@ -25,6 +25,31 @@ function opKey(pluginId: string, operationId: string): string {
   return `${pluginId}::${operationId}`
 }
 
+function unknownOpError(pluginId: string, operationId: string): Error {
+  return new Error(
+    `Unknown catalog operation ${pluginId}/${operationId} (missing from this snapshot)`,
+  )
+}
+
+/**
+ * Resolve an op missing from this client's snapshot via the live module-level
+ * catalog (peek, then refresh-once). Never falls back to a blind `/execute`
+ * POST — host console ops are 501 there.
+ */
+async function resolveLiveOp(
+  pluginId: string,
+  operationId: string,
+): Promise<CatalogOperation> {
+  const runtime = await import("../catalogRuntime")
+  const peeked = runtime.peekCatalogClient()?.get(pluginId, operationId)
+  if (peeked) return peeked
+  runtime.invalidateCatalogClient()
+  const fresh = await runtime.ensureCatalogClient()
+  const op = fresh.get(pluginId, operationId)
+  if (!op) throw unknownOpError(pluginId, operationId)
+  return op
+}
+
 /**
  * Build a catalog client from a snapshot of operations (catalog or OpenAPI-derived).
  */
@@ -34,29 +59,23 @@ export function createCatalogClient(operations: CatalogOperation[]): CatalogClie
     operations.map((op) => [opKey(op.plugin_id, op.operation_id), op] as const),
   )
 
+  const call = async (
+    pluginId: string,
+    operationId: string,
+    args: Record<string, unknown> = {},
+  ): Promise<unknown> => {
+    const local = ops.get(opKey(pluginId, operationId))
+    const op = local ?? (await resolveLiveOp(pluginId, operationId))
+    return invokeCatalogOperation(op, args)
+  }
+
   return {
     operations: inner.operations,
     ops,
     get: inner.get,
-    call: async (pluginId, operationId, args = {}) => {
-      const op = ops.get(opKey(pluginId, operationId))
-      if (op) return invokeCatalogOperation(op, args)
-      // Op missing from this snapshot. Host console ops are mirrored with
-      // is_fast_path=False (core/route_registry/host_catalog.py), so a
-      // blind POST /execute is guaranteed 501 for exactly the ops this
-      // client serves — fail with a diagnosable error instead. Callers that
-      // want retry-on-miss should go through `callCatalogOp`
-      // (catalogRuntime.ts), which re-fetches the live snapshot first.
-      throw new Error(
-        `Unknown catalog operation ${pluginId}/${operationId} (missing from this snapshot)`,
-      )
-    },
+    call,
     op(pluginId, operationId) {
-      return (args = {}) => {
-        const op = ops.get(opKey(pluginId, operationId))
-        if (op) return invokeCatalogOperation(op, args)
-        return inner.call(pluginId, operationId, args)
-      }
+      return (args = {}) => call(pluginId, operationId, args)
     },
   }
 }

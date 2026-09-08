@@ -35,24 +35,29 @@ function jsonResponse(body: unknown, status = 200, headers: Record<string, strin
 }
 
 describe("catalogRuntime", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks()
+    const canonical = await import("../catalogRuntime")
+    canonical.invalidateCatalogClient()
   })
 
-  it("a 304 with a prior snapshot keeps operations available (no phantom empty client)", async () => {
+  it("a 200 then a later getCatalog 304 leaves the snapshot intact", async () => {
     const runtime = await import("../catalogRuntime?t=" + Date.now())
-    runtime.setCatalogSnapshot({
-      revision: 1,
-      etag: '"v1"',
-      operations: [sampleOp()],
-    })
-
-    // Simulate a browser-triggered revalidation: server answers 304.
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 304 }))
+    const { getCatalog } = await import("../catalog")
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        jsonResponse({ revision: 1, etag: '"v1"', operations: [sampleOp()] }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 304 }))
 
     const client = await runtime.ensureCatalogClient()
     expect(client.get("api.plugins", "api_list_plugins")?.operation_id).toBe("api_list_plugins")
     expect(runtime.getCatalogOperations()).toHaveLength(1)
+
+    const again = await getCatalog()
+    expect(again).toBeNull()
+    expect(runtime.getCatalogOperations()).toHaveLength(1)
+    expect(runtime.peekCatalogClient()?.get("api.plugins", "api_list_plugins")).toBeTruthy()
   })
 
   it("repeated 304 with no prior snapshot throws instead of installing an empty client", async () => {
@@ -60,6 +65,8 @@ describe("catalogRuntime", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 304 }))
 
     await expect(runtime.ensureCatalogClient()).rejects.toThrow(/Catalog snapshot unavailable/)
+    expect(runtime.getCatalogOperations()).toHaveLength(0)
+    expect(runtime.peekCatalogClient()).toBeNull()
   })
 
   it("callCatalogOp refreshes once and retries on a snapshot miss instead of POSTing /execute", async () => {
