@@ -83,6 +83,12 @@ async def _server_lifespan(_) -> AsyncIterator[None]:
     await run_pipeline(ctx)
     yield
     await run_teardown(ctx)
+    from core.context import listen_handler
+    if listen_handler is not None:
+        try:
+            listen_handler.close()
+        except Exception:
+            pass
 
 
 # Attach our lifespan before the server loop starts.
@@ -194,7 +200,6 @@ if __name__ == "__main__":
     if args.transport == "http":
         import uvicorn
 
-        os.environ["WHISKERS_TRANSPORT"] = "http"
         os.environ["WHISKERS_TRANSPORT"] = "http"
         os.environ["FASTMCP_STATELESS"] = "true"
 
