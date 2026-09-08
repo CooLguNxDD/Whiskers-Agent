@@ -1,0 +1,126 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Version control
+.gitlab-ci.yml
+.github
+
+# IDE and editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# Python
+__pycache__
+**/__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# Environment files (don't copy sensitive .env into image)
+.env
+.env.local
+.env.*.local
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+docs/
+
+# Tests (keep source out of image; run via bind-mount or scripts/run_tests.py)
+test/
+tests/
+test_*.py
+*_test.py
+plugins/*/tests/
+
+# Node — must exclude at every depth (pnpm nested symlinks break BuildKit on Windows)
+node_modules
+**/node_modules
+**/node_modules/**
+**/.pnpm-store
+**/.pnpm-store/**
+npm-debug.log
+
+# Frontend host install / build artefacts (not needed in Python MCP image)
+frontend/cat-admin-frontend/node_modules
+frontend/cat-admin-frontend/node_modules/**
+frontend/cat-admin-frontend/dist
+frontend/cat-admin-frontend/playwright-report
+frontend/cat-admin-frontend/test-results
+frontend/cat-admin-frontend/coverage
+whiskers-vscode/node_modules
+whiskers-vscode/node_modules/**
+whiskers-vscode/out
+
+# Quarantined/legacy plugins — not loaded at runtime, keep out of the build context
+legacy_plugins/
+
+# Design / local playground assets (not runtime)
+whiskers-design-temp/
+terminals/
+logs/
+mcps/
+.claude/
+.antigravitycli/
+goals/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temporary files
+tmp/
+temp/
+*.log
+
+# Agent and Virtual Environments
+.venv/
+.venv-linux/
+.antigravitycli/
+.claude/
+.claude-plugin/
+.Jules/
+.playwright-mcp/
+graphify-out/
+logs/
+pgadmin/
+

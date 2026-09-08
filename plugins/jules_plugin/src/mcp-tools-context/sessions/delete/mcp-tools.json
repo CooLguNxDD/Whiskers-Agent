@@ -1,0 +1,26 @@
+[
+  {
+    "name": "delete_session",
+    "description": "Delete a Session",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "DeleteSession",
+      "method": "DELETE",
+      "path": "/v1alpha/sessions/{sessionId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  }
+]

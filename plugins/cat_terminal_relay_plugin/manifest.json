@@ -1,0 +1,31 @@
+{
+  "name": "cat_terminal_relay_plugin",
+  "version": "0.1.1",
+  "tier": "pro",
+  "description": "Reverse WebSocket relay for remote interactive terminals hosted in an IDE extension. The relay is a dumb byte pipe; the PTY lives on the host. Guarded by a command allowlist + multi-layer auth.",
+  "author": "Cat Studios",
+  "requires": [],
+  "scopes": [
+    {"token": "plugin:cat_terminal_relay_plugin", "description": "Full access to cat terminal relay tools"},
+    {"token": "group:cat_terminal_relay_plugin:terminal", "description": "Terminal relay execution and host operations"}
+  ],
+  "gate": {
+    "core": ["core:terminal:read", "core:terminal:write", "core:terminal.sandbox:write"]
+  },
+  "settings": {
+    "terminal_token_ttl_seconds": 5000,
+    "session_idle_ttl_seconds": 900,
+    "session_absolute_ttl_seconds": 14400,
+    "reaper_interval_seconds": 30,
+    "max_sessions_per_subject": 5,
+    "step_up_method": "totp",
+    "elevation_ttl_seconds": 300,
+    "max_attempts": 3,
+    "lockout_seconds": 300,
+    "terminal_host_token_ttl_seconds": 900,
+    "sandbox_workdir": "sandbox",
+    "sandbox_timeout_s": 60,
+    "sandbox_max_output_bytes": 65536,
+    "sandbox_require_elevation": true
+  }
+}

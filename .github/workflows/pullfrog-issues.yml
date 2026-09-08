@@ -1,0 +1,39 @@
+# SaaS parity: issue enrichment (default mode: Plan + auto-label).
+name: Pullfrog issues
+
+on:
+  issues:
+    types: [opened]
+
+concurrency:
+  group: pullfrog-issues-${{ github.repository }}-${{ github.event.issue.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  enrich:
+    # Disabled
+    if: false
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+      issues: write
+      checks: write
+      actions: read
+      statuses: write
+    uses: ./.github/workflows/pullfrog.yml
+    with:
+      name: "Issue #${{ github.event.issue.number }} enrich"
+      feature: issues
+      prompt: |
+        You are Pullfrog running fully locally on repo (no hosted dashboard).
+        Read `.github/pullfrog/instructions/plan.md` and `build.md` if present.
+
+        Mode hint: Plan — analyze this new issue and post an implementation plan
+        as an issue comment. Also apply up to 3 existing repo labels that fit
+        (do not invent labels). Do not open a PR unless the issue body clearly
+        asks to implement immediately.
+
+        Trigger event details are available in the file `.github/pullfrog/event.json`.
+        Read that file to understand the event context.
+    secrets: inherit

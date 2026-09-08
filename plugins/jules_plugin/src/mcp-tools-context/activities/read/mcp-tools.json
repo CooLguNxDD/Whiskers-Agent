@@ -1,0 +1,82 @@
+[
+  {
+    "name": "list_activities",
+    "description": "List Activities",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagesize"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagetoken"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ListActivities",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}/activities",
+      "tags": [],
+      "security": [],
+      "query": [
+        "pageSize",
+        "pageToken"
+      ]
+    }
+  },
+  {
+    "name": "get_activity",
+    "description": "Get an Activity",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "activityId": {
+          "title": "Activityid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "activityId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "GetActivity",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}/activities/{activityId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  }
+]

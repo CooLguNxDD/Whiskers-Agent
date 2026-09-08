@@ -1,0 +1,46 @@
+# Optional LLM/graph tracing lane (Phase 3 of the telemetry plan). Never part
+# of the default stack — `docker compose up` alone never starts this.
+#
+# One-time setup (creates a separate `phoenix` database — never the app DB):
+#   docker exec -i whiskers-postgres psql -U whiskers -d postgres -f - < scripts/create_phoenix_db.sql
+#
+# Start:
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up -d phoenix
+#
+# Point the server at it (server restart required — see
+# core/telemetry/otel_setup.py, a no-op unless this is set):
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://phoenix:6006/v1/traces
+#
+# Stop (leaves the main stack untouched):
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml stop phoenix
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-9.5.0
+    container_name: whiskers-phoenix
+    ports:
+      - "6006:6006"  # UI + OTLP HTTP (/v1/traces)
+      - "4317:4317"  # OTLP gRPC
+    environment:
+      PHOENIX_SQL_DATABASE_URL: postgresql://phoenix:phoenix@postgres:5432/phoenix
+      PHOENIX_TELEMETRY_ENABLED: "false"
+    networks:
+      - whiskers-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1GB
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+networks:
+  whiskers-network:
+    driver: bridge
+    # Not `external: true` — the project-prefixed runtime name of the base
+    # file's network isn't portable across checkouts/machines (CLAUDE.md
+    # §9: keep the compose project name stable). Passing both files together
+    # (see the -f ... -f ... commands above) merges this into the same
+    # network definition instead.

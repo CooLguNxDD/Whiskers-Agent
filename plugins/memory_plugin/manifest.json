@@ -1,0 +1,32 @@
+{
+  "name": "memory_plugin",
+  "version": "1.1.0",
+  "tier": "free",
+  "description": "Persistent semantic memory MCP tools over core.memory (shared with harness plan recipes).",
+  "author": "Whiskers Agent",
+  "requires": [],
+  "capabilities": [
+    "memory_save",
+    "memory_search",
+    "memory_manage",
+    "plan_recipe_search"
+  ],
+  "scopes": [
+    {
+      "token": "plugin:memory_plugin",
+      "description": "Full access to memory_plugin tools"
+    },
+    {
+      "token": "group:memory_plugin:read",
+      "description": "Search and list memories / plan recipes"
+    },
+    {
+      "token": "group:memory_plugin:write",
+      "description": "Save and delete global memories"
+    }
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "skills": ["skills/agent-memory/SKILL.md"]
+}

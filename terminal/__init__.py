@@ -1,0 +1,1 @@
+"""Terminal package: bootstrap (root), TUIs (tui/), entry scripts (script/)."""

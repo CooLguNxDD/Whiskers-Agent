@@ -1,0 +1,39 @@
+{
+  "python-envs.pythonProjects": [
+    {
+      "path": ".",
+      "envManager": "ms-python.python:system",
+      "packageManager": "ms-python.python:pip"
+    }
+  ],
+  "git.autorefresh": true,
+  "files.watcherExclude": {
+    "**/__pycache__/**": true,
+    "**/.antigravitycli/**": true,
+    "**/.claude/**": true,
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/.Jules/**": true,
+    "**/.mypy_cache/**": true,
+    "**/.pytest_cache/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.venv/**": true,
+    "**/logs/**": true,
+    "**/node_modules/**": true,
+    "**/playwright-report/**": true,
+    "**/test-results/**": true
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.antigravitycli": true,
+    "**/.Jules": true,
+    "**/.mypy_cache": true,
+    "**/.pytest_cache": true,
+    "**/.ruff_cache": true,
+    "**/.venv": true,
+    "**/logs": true,
+    "**/playwright-report": true,
+    "**/test-results": true
+  },
+  "files.autoSave": "afterDelay"
+}

@@ -1,0 +1,11 @@
+# Dual-tunnel: CatPortfolio SPA + Whiskers Agent API (for ?j= layout + ask).
+# Merge with your authed ngrok config:
+#   ngrok start --all --config "$env:LOCALAPPDATA\ngrok\ngrok.yml,scripts\ngrok-portfolio.yml"
+version: "3"
+tunnels:
+  portfolio:
+    proto: http
+    addr: 11000
+  oct-api:
+    proto: http
+    addr: 10000

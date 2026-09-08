@@ -1,0 +1,8 @@
+{
+  "name": "world-context",
+  "version": "0.1.0",
+  "description": "Routing skill for Unity scene semantic context: hybrid transport between unity-mcp (editor) and Whiskers Agent world_semantic_plugin (spatial store). Step 1: index + query only.",
+  "author": {
+    "name": "CCLemonExp"
+  }
+}

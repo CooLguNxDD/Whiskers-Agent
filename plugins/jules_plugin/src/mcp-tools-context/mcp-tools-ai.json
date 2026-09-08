@@ -1,0 +1,380 @@
+[
+  {
+    "name": "list_sessions",
+    "description": "List Sessions",
+    "inputSchema": {
+      "properties": {
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagesize"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagetoken"
+        }
+      },
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ListSessions",
+      "method": "GET",
+      "path": "/v1alpha/sessions",
+      "tags": [],
+      "security": [],
+      "query": [
+        "pageSize",
+        "pageToken"
+      ]
+    }
+  },
+  {
+    "name": "create_session",
+    "description": "Create a Session",
+    "inputSchema": {
+      "properties": {
+        "prompt": {
+          "description": "The task description for Jules to execute.",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional title for the session. If not provided, the system will generate one.",
+          "title": "Title"
+        },
+        "sourceContext": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcecontext"
+        },
+        "requirePlanApproval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If true, plans require explicit approval before execution. If not set, plans are auto-approved.",
+          "title": "Requireplanapproval"
+        },
+        "automationMode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Automationmode"
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "CreateSession",
+      "method": "POST",
+      "path": "/v1alpha/sessions",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "get_session",
+    "description": "Get a Session",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "GetSession",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "delete_session",
+    "description": "Delete a Session",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "DeleteSession",
+      "method": "DELETE",
+      "path": "/v1alpha/sessions/{sessionId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "list_activities",
+    "description": "List Activities",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagesize"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagetoken"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ListActivities",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}/activities",
+      "tags": [],
+      "security": [],
+      "query": [
+        "pageSize",
+        "pageToken"
+      ]
+    }
+  },
+  {
+    "name": "get_activity",
+    "description": "Get an Activity",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "activityId": {
+          "title": "Activityid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "activityId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "GetActivity",
+      "method": "GET",
+      "path": "/v1alpha/sessions/{sessionId}/activities/{activityId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "approve_plan",
+    "description": "Approve a Plan",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ApprovePlan",
+      "method": "POST",
+      "path": "/v1alpha/sessions/{sessionId}:approvePlan",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "send_message",
+    "description": "Send a Message",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "SendMessage",
+      "method": "POST",
+      "path": "/v1alpha/sessions/{sessionId}:sendMessage",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "list_sources",
+    "description": "List Sources",
+    "inputSchema": {
+      "properties": {
+        "pageSize": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagesize"
+        },
+        "pageToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagetoken"
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filter",
+          "description": "AIP-160 filter expression, e.g. \"name=sources/github/owner/repo\" or \"name=sources/source1 OR name=sources/source2\". A bare keyword (e.g. \"myrepo\") is not valid AIP-160 and returns 400 Bad Request."
+        }
+      },
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ListSources",
+      "method": "GET",
+      "path": "/v1alpha/sources",
+      "tags": [],
+      "security": [],
+      "query": [
+        "pageSize",
+        "pageToken",
+        "filter"
+      ]
+    }
+  },
+  {
+    "name": "get_source",
+    "description": "Get a Source",
+    "inputSchema": {
+      "properties": {
+        "sourceId": {
+          "title": "Sourceid",
+          "type": "string",
+          "description": "The bare source id WITHOUT the \"sources/\" prefix — the path template already supplies it (a full path like \"sources/github/owner/repo\" here 404s as \"sources/sources/...\"). Example: \"github/CooLguNxDD/Whiskers-Agent-Full\"."
+        }
+      },
+      "required": [
+        "sourceId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "GetSource",
+      "method": "GET",
+      "path": "/v1alpha/sources/{sourceId}",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  }
+]
