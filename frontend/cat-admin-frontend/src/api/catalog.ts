@@ -62,6 +62,12 @@ export interface ExecuteResult {
 
 /**
  * Fetch the live catalog (optional plugin_id / UI slot filters).
+ *
+ * Returns `null` only for a real 304 (an explicit `opts.etag` matched the
+ * server's current ETag) — meaning "not modified, reuse your prior
+ * snapshot", never "empty". `cache: "no-store"` keeps the browser's own
+ * HTTP cache from injecting a silent revalidation (and thus a surprise
+ * 304) on a call that never asked for one.
  */
 export async function getCatalog(opts?: {
   pluginId?: string
@@ -80,7 +86,7 @@ export async function getCatalog(opts?: {
   }
 
   try {
-    return await request<CatalogResponse>(path, { headers })
+    return await request<CatalogResponse>(path, { headers, cache: "no-store" })
   } catch (err) {
     if (err instanceof Error && err.message === "Request failed: 304") {
       return null
