@@ -2,7 +2,6 @@ import { Globe } from "lucide-react"
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
   "whiskers": "Full access to Whiskers Agent endpoints.",
-  "whiskers": "Full access to Whiskers Agent endpoints.",
   "core:terminal:write": "Allow terminal command execution.",
   "core:terminal:read": "Allow viewing and hosting terminal sessions.",
   "agy": "Orchestrate agentic workflows.",
