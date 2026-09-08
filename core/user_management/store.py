@@ -267,3 +267,64 @@ async def list_users(tenant_id: int | None = None) -> list[dict]:
         result = await session.execute(stmt)
         users = result.scalars().all()
         return [_user_to_dict(u) for u in users]
+
+
+async def update_user_password(username: str, new_password: str) -> bool:
+    """Update password for an existing user in both the users table and the Vault."""
+    if not new_password or not new_password.strip():
+        raise ValueError("Password cannot be empty.")
+
+    hashed = hash_password(new_password)
+    user_role = None
+    async with get_async_session() as session:
+        stmt = select(User).where(User.username == username).limit(1)
+        result = await session.execute(stmt)
+        user = result.scalars().first()
+        if user is None:
+            return False
+        user_role = user.role
+        user.password_hash = hashed
+        await session.commit()
+
+    # Synchronize with Vault if admin or master user
+    try:
+        vault = VaultService()
+        vault_admin = await vault.get("admin", "username")
+        if vault_admin == username or user_role == "master":
+            await vault.set("admin", "password_hash", hashed)
+    except Exception as exc:
+        logger.warning("Failed to sync updated password hash to Vault: %s", exc)
+
+    return True
+
+
+async def update_user_username(old_username: str, new_username: str) -> bool:
+    """Update username for an existing user in both the users table and the Vault."""
+    if not new_username or not new_username.strip():
+        raise ValueError("Username cannot be empty.")
+
+    user_role = None
+    async with get_async_session() as session:
+        stmt = select(User).where(User.username == old_username).limit(1)
+        result = await session.execute(stmt)
+        user = result.scalars().first()
+        if user is None:
+            return False
+        user_role = user.role
+        user.username = new_username.strip()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            raise ValueError(f"User with username '{new_username}' already exists.")
+
+    # Synchronize with Vault if admin or master user
+    try:
+        vault = VaultService()
+        vault_admin = await vault.get("admin", "username")
+        if vault_admin == old_username or user_role == "master":
+            await vault.set("admin", "username", new_username.strip())
+    except Exception as exc:
+        logger.warning("Failed to sync updated username to Vault: %s", exc)
+
+    return True
