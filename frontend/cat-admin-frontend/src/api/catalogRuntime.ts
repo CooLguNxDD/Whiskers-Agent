@@ -37,6 +37,14 @@ export function peekCatalogClient(): CatalogClient | null {
 
 /**
  * Ensure the live catalog is loaded (deduped). Safe to call from API modules.
+ *
+ * A `null` result from `getCatalog()` means "304, reuse the prior snapshot" —
+ * it must never be coerced into an empty client, since a browser-level
+ * revalidation the app never asked for (see `getCatalog` doc) would then
+ * permanently blank every subsequent `callCatalogOp` lookup. With no prior
+ * client to fall back on, retry once before giving up; a caller that still
+ * gets nothing throws so the next call re-fetches instead of caching a dead
+ * empty catalog forever.
  */
 export async function ensureCatalogClient(): Promise<CatalogClient> {
   if (_client && _snapshot) return _client
@@ -44,12 +52,14 @@ export async function ensureCatalogClient(): Promise<CatalogClient> {
 
   _loadPromise = (async () => {
     try {
-      const data = await getCatalog()
+      let data = await getCatalog()
+      if (!data && !_client) {
+        data = await getCatalog()
+      }
       if (data) {
         setCatalogSnapshot(data)
       } else if (!_client) {
-        // 304 with no prior snapshot — empty client
-        setCatalogSnapshot({ revision: 0, etag: "", operations: [] })
+        throw new Error("Catalog snapshot unavailable (repeated 304 with no prior data)")
       }
       return _client!
     } finally {
@@ -72,6 +82,12 @@ export function invalidateCatalogClient(): void {
 /**
  * Call a catalog operation by (plugin_id, operation_id).
  * Loads the catalog on first use. Prefers HTTP exposure paths from the snapshot.
+ *
+ * A snapshot miss (`CatalogClient.call` throws "Unknown catalog operation")
+ * refreshes the live catalog once and retries — covers a stale/filtered
+ * client (e.g. a scope change) without ever falling back to the blind
+ * `/execute` POST, which is guaranteed 501 for host console ops (see
+ * `createCatalogClient.ts` / `inferenceClient.ts`).
  */
 export async function callCatalogOp<T = unknown>(
   pluginId: string,
@@ -79,7 +95,16 @@ export async function callCatalogOp<T = unknown>(
   args: Record<string, unknown> = {},
 ): Promise<T> {
   const client = await ensureCatalogClient()
-  return client.call(pluginId, operationId, args) as Promise<T>
+  try {
+    return (await client.call(pluginId, operationId, args)) as T
+  } catch (err) {
+    if (!(err instanceof Error) || !err.message.startsWith("Unknown catalog operation")) {
+      throw err
+    }
+    invalidateCatalogClient()
+    const fresh = await ensureCatalogClient()
+    return (await fresh.call(pluginId, operationId, args)) as T
+  }
 }
 
 /**

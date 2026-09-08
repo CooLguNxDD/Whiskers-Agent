@@ -105,12 +105,14 @@ export function createInferenceClient(operations: CatalogOperation[]): Inference
     async call(pluginId, operationId, args = {}) {
       const op = byKey.get(`${pluginId}::${operationId}`)
       if (!op) {
-        // Fallback: server-side execute (validates + resolves without FE path knowledge)
-        const res = await executeOperation(pluginId, operationId, args)
-        if (res && typeof res === "object" && "result" in res) {
-          return (res as { result: unknown }).result
-        }
-        return res
+        // Op missing from this snapshot. Host console ops are mirrored with
+        // is_fast_path=False (core/route_registry/host_catalog.py), so a
+        // blind POST /execute is guaranteed 501 for exactly the ops this
+        // client serves — fail with a diagnosable error instead of masking
+        // a stale/filtered snapshot as a server-side 501.
+        throw new Error(
+          `Unknown catalog operation ${pluginId}/${operationId} (missing from this snapshot)`,
+        )
       }
       return invokeCatalogOperation(op, args)
     },
