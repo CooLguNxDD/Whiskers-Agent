@@ -29,7 +29,7 @@ def _load_spec():
 def test_flow_spec_parses():
     spec = _load_spec()
     assert spec.flow_id == "career_ops_apply_v1"
-    assert len(spec.stages) == 10
+    assert len(spec.stages) == 11
 
 
 def test_slot_chain_is_fully_resolved():

@@ -65,6 +65,10 @@ or a shape the flow doesn't cover
 - `render_resume_pdf(applicant_profile_id, tailored_text, kind="resume", job_id="",
   portfolio_job_id="")` — ATS PDF to MinIO with a presigned URL; when `portfolio_job_id` is set,
   bakes a clickable portfolio link into the contact header.
+- `render_cover_letter_pdf(applicant_profile_id, cover_letter_text, job_id="", portfolio_job_id="")` —
+  renders the tailored cover letter to an ATS-compliant PDF in MinIO with a presigned URL using the exact
+  same theme, typography (Helvetica), margins, and contact header (name, email, phone, and clickable
+  baked CatPortfolio link) as the resume PDF.
 
 **Apply / Track**
 - `create_application(job_id, provider, applicant_profile_id, ...)` /
