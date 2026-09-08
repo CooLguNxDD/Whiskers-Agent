@@ -64,12 +64,6 @@ RUN groupadd --system whiskers-claude \
          --home-dir /home/whiskers-claude --shell /usr/sbin/nologin \
          whiskers-claude \
     && mkdir -p /home/whiskers-claude/.claude /home/whiskers-claude/.grok \
-    && chown -R whiskers-claude:whiskers-claude /home/whiskers-claude \
-    && groupadd --system whiskers-claude \
-    && useradd --system --gid whiskers-claude --create-home \
-         --home-dir /home/whiskers-claude --shell /usr/sbin/nologin \
-         whiskers-claude \
-    && mkdir -p /home/whiskers-claude/.claude /home/whiskers-claude/.grok \
     && chown -R whiskers-claude:whiskers-claude /home/whiskers-claude
 
 # Copy requirements first for better layer caching
@@ -83,7 +77,6 @@ COPY . .
 
 # CLI user must be able to read package instructions + write under logs when needed
 RUN mkdir -p /app/logs/goap_agent \
-    && chown -R whiskers-claude:whiskers-claude /app/logs \
     && chown -R whiskers-claude:whiskers-claude /app/logs \
     && chmod -R a+rX /app/core_graph/goap_agent/instructions || true
 

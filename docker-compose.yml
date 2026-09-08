@@ -73,6 +73,17 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
 
+      # Local LLM & Embedding endpoint configuration (LM Studio)
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      EMBED_PROVIDER: ${EMBED_PROVIDER:-}
+      EMBED_MODEL: ${EMBED_MODEL:-}
+      EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-}
+      EMBED_BASE_URL: ${EMBED_BASE_URL:-}
+      EMBED_API_KEY: ${EMBED_API_KEY:-}
+      EMBED_PROFILE: ${EMBED_PROFILE:-}
+
       # Claude Code CLI (LLM_PROVIDER=claude-cli / GoapAgent_run_cli_agent)
       # Generate a long-lived token on a trusted host: `claude setup-token`
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
@@ -117,6 +128,8 @@ services:
 
     networks:
       - whiskers-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     # Restart policy
     restart: unless-stopped
