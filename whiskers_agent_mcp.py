@@ -87,8 +87,8 @@ async def _server_lifespan(_) -> AsyncIterator[None]:
     if listen_handler is not None:
         try:
             listen_handler.close()
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("Error closing listen_handler during teardown: %s", _exc)
 
 
 # Attach our lifespan before the server loop starts.
