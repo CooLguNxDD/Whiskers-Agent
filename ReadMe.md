@@ -2,7 +2,6 @@
 
 Plugin-driven [Model Context Protocol](https://modelcontextprotocol.io/) platform. FastMCP over `stdio` and HTTP, LangGraph/GOAP orchestration, two-layer OAuth, an encrypted credential vault, hot-swappable plugins, and a React admin console. The core server is domain-agnostic; domain integrations live in `plugins/`.
 
-- **Repo**: [github.com/CooLguNxDD/Open-Cat-Tunnel-MCP](https://github.com/CooLguNxDD/Open-Cat-Tunnel-MCP) · [github.com/CooLguNxDD/OpenCat-Mcp-Full](https://github.com/CooLguNxDD/OpenCat-Mcp-Full)
 - **Notion**: [MCP Project Space](https://www.notion.so/MCP-Project-3352783caabd801d9a05ecdf106def00)
 - **Setup**: [SetupGuide.md](./SetupGuide.md) · [CONTRIBUTING.md](./CONTRIBUTING.md)
 - **Contributor index**: [CLAUDE.md](./CLAUDE.md) (architecture, guardrails, file map, skills)
