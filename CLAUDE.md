@@ -441,8 +441,8 @@ goals/                  agent goal files / achieve() persistence
   Paste ingest + board identity live in `posting_ingest.py` (Indeed `jk`/`vjk`, agency/via/
   `end_employer`, `employment_class`); recruiter-safe portfolio URLs in `portfolio_link.py`
   (never `localhost:11000`). **`career_ops_apply_v1`** FlowSpec (`flow_specs/career_ops_apply_v1.json`) pairs this plugin with
-  `portfolio_plugin` into one dispatchable pipeline — ten deterministic stages: ingest →
-  signal-resolve → liveness → fit-score → bake → tailor resume/cover letter → render PDF → track.
+  `portfolio_plugin` into one dispatchable pipeline — eleven deterministic stages: ingest →
+  signal-resolve → liveness → fit-score → bake → links → tailor resume → render resume PDF → tailor cover letter → render cover letter PDF → track.
   Liveness is its own stage, not something `fetch_job_posting` does inline: that tool is tagged
   `read`/`readOnlyHint: True` while a liveness check writes a `job_posting_liveness` row. It sits
   after `signals` because a stage's `reads` entry *is* the callee's parameter name verbatim — an

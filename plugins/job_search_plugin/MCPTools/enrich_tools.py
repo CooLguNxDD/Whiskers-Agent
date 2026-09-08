@@ -225,3 +225,38 @@ async def render_resume_pdf(
         "presigned_url": url,
         "kind": kind,
     }
+
+
+@mcp.tool(
+    title="render_cover_letter_pdf",
+    tags={"job_search_plugin", "enrich", "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def render_cover_letter_pdf(
+    applicant_profile_id: int,
+    cover_letter_text: str,
+    job_id: str = "",
+    portfolio_job_id: str = "",
+) -> dict:
+    """Render the tailored cover letter as a searchable PDF and upload it to MinIO storage.
+
+    Bakes the exact same contact header (name, email, phone, and job-specific
+    portfolio URL) and theme/typography styling as the resume PDF. Returns the object
+    storage key and temporary presigned URL.
+    """
+    res = await render_resume_pdf(
+        applicant_profile_id=applicant_profile_id,
+        tailored_text=cover_letter_text,
+        kind="cover_letter",
+        job_id=job_id,
+        portfolio_job_id=portfolio_job_id,
+    )
+    return {
+        "status": res.get("status", "ok"),
+        "cover_letter_object_key": res.get("object_key"),
+        "cover_letter_presigned_url": res.get("presigned_url"),
+        "object_key": res.get("object_key"),
+        "presigned_url": res.get("presigned_url"),
+        "kind": "cover_letter",
+    }
+

@@ -259,6 +259,23 @@
       "on_fail": "continue"
     },
     {
+      "id": "cover_pdf",
+      "kind": "deterministic",
+      "op": "job_search_plugin/job_search_plugin__render_cover_letter_pdf",
+      "reads": [
+        "applicant_profile_id",
+        "cover_letter_text",
+        "job_id",
+        "portfolio_job_id"
+      ],
+      "writes": [
+        "cover_letter_object_key",
+        "cover_letter_presigned_url"
+      ],
+      "required_outputs": [],
+      "on_fail": "continue"
+    },
+    {
       "id": "track",
       "kind": "deterministic",
       "op": "job_search_plugin/job_search_plugin__sync_application_status",
