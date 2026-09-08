@@ -42,6 +42,8 @@ from core.context._app import (
     mcp_context_builder,
     mcp,
     mcp_middleware,
+    subscription_bus,
+    listen_handler,
 )
 from core.context._registries import (
     route_registry,

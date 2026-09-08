@@ -165,6 +165,24 @@ else:
     )
     logger.info("OAuth authentication DISABLED - using env-var credentials")
 
+# Modern MCP subscriptions/listen support (2026-07-28 SEP-2575)
+subscription_bus = None
+listen_handler = None
+try:
+    from mcp.server.subscriptions import ListenHandler, InMemorySubscriptionBus
+    from mcp_types import SubscriptionsListenRequestParams
+
+    subscription_bus = InMemorySubscriptionBus()
+    listen_handler = ListenHandler(subscription_bus)
+    mcp._mcp_server.add_request_handler(
+        "subscriptions/listen",
+        SubscriptionsListenRequestParams,
+        listen_handler,
+    )
+    logger.info("MCP subscriptions/listen handler registered successfully")
+except Exception as _sub_err:
+    logger.warning("Failed to register subscriptions/listen handler: %s", _sub_err)
+
 if _DB_AVAILABLE and oauth_relay is None:
     from oauth.oauth_relay import ExternalOAuthRelay
 
@@ -172,3 +190,4 @@ if _DB_AVAILABLE and oauth_relay is None:
         vault=vault,  # reuse the shared singleton from this module
         plugin_manifests={},
     )
+
