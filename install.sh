@@ -104,7 +104,7 @@ if [ "$SKIP_DEPS" -eq 0 ]; then
   fi
 
   if [ "$USED_UV" -eq 1 ]; then
-    uv venv .venv --python 3.11
+    uv venv --allow-existing .venv --python 3.11
     uv pip install -r requirements.txt
     PYTHON="$ROOT/.venv/bin/python"
     if [ ! -x "$PYTHON" ]; then
