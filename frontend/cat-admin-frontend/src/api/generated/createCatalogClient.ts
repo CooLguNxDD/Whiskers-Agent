@@ -4,7 +4,6 @@
 
 import type { CatalogOperation } from "../catalog"
 import { createInferenceClient, invokeCatalogOperation } from "../inferenceClient"
-import { executeOperation } from "../catalog"
 
 /** Bound caller returned by `CatalogClient.op`. */
 export type BoundOpCaller = (args?: Record<string, unknown>) => Promise<unknown>
@@ -26,6 +25,31 @@ function opKey(pluginId: string, operationId: string): string {
   return `${pluginId}::${operationId}`
 }
 
+function unknownOpError(pluginId: string, operationId: string): Error {
+  return new Error(
+    `Unknown catalog operation ${pluginId}/${operationId} (missing from this snapshot)`,
+  )
+}
+
+/**
+ * Resolve an op missing from this client's snapshot via the live module-level
+ * catalog (peek, then refresh-once). Never falls back to a blind `/execute`
+ * POST — host console ops are 501 there.
+ */
+async function resolveLiveOp(
+  pluginId: string,
+  operationId: string,
+): Promise<CatalogOperation> {
+  const runtime = await import("../catalogRuntime")
+  const peeked = runtime.peekCatalogClient()?.get(pluginId, operationId)
+  if (peeked) return peeked
+  runtime.invalidateCatalogClient()
+  const fresh = await runtime.ensureCatalogClient()
+  const op = fresh.get(pluginId, operationId)
+  if (!op) throw unknownOpError(pluginId, operationId)
+  return op
+}
+
 /**
  * Build a catalog client from a snapshot of operations (catalog or OpenAPI-derived).
  */
@@ -35,26 +59,23 @@ export function createCatalogClient(operations: CatalogOperation[]): CatalogClie
     operations.map((op) => [opKey(op.plugin_id, op.operation_id), op] as const),
   )
 
+  const call = async (
+    pluginId: string,
+    operationId: string,
+    args: Record<string, unknown> = {},
+  ): Promise<unknown> => {
+    const local = ops.get(opKey(pluginId, operationId))
+    const op = local ?? (await resolveLiveOp(pluginId, operationId))
+    return invokeCatalogOperation(op, args)
+  }
+
   return {
     operations: inner.operations,
     ops,
     get: inner.get,
-    call: async (pluginId, operationId, args = {}) => {
-      const op = ops.get(opKey(pluginId, operationId))
-      if (op) return invokeCatalogOperation(op, args)
-      // Op missing from snapshot (stale filter) — server execute still works
-      const res = await executeOperation(pluginId, operationId, args)
-      if (res && typeof res === "object" && "result" in res) {
-        return (res as { result: unknown }).result
-      }
-      return res
-    },
+    call,
     op(pluginId, operationId) {
-      return (args = {}) => {
-        const op = ops.get(opKey(pluginId, operationId))
-        if (op) return invokeCatalogOperation(op, args)
-        return inner.call(pluginId, operationId, args)
-      }
+      return (args = {}) => call(pluginId, operationId, args)
     },
   }
 }
