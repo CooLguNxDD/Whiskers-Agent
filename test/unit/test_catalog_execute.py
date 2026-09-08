@@ -265,6 +265,40 @@ async def test_execute_native_response_shape_is_not_intercepted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_execute_not_executable_host_mirrored_op() -> None:
+    """Host-mirrored console routes publish with is_fast_path=False,
+    callable_ref=None (core/route_registry/host_catalog.py) — execute must
+    reject them as 501 not_executable rather than attempting to call None.
+    """
+    from core.route_registry.operation_descriptor import Visibility
+
+    op = OperationDescriptor(
+        plugin_id="api.plugins",
+        operation_id="api_list_plugins",
+        description="host route",
+        input_schema={"type": "object", "properties": {}, "additionalProperties": True},
+        access=AccessClass.READ,
+        required_scopes=(),
+        visibility=Visibility.AUTHENTICATED,
+        version="1",
+        tags=("plugins", "host"),
+        http=None,
+        mcp=None,
+        ui=None,
+        is_fast_path=False,
+        callable_ref=None,
+    )
+    get_operation_catalog().publish_owner("api.plugins", [op])
+
+    with pytest.raises(ExecuteError) as ei:
+        await execute_operation(
+            "api.plugins", "api_list_plugins", {}, caller_scopes=["admin"],
+        )
+    assert ei.value.status == 501
+    assert ei.value.code == "not_executable"
+
+
+@pytest.mark.asyncio
 async def test_execute_async_callable_object() -> None:
     class AsyncEcho:
         async def __call__(self, msg: str):

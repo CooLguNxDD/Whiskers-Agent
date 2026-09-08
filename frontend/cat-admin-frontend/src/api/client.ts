@@ -116,7 +116,18 @@ export async function request<T>(
   }
 
   if (!res.ok) {
-    throw new Error(`Request failed: ${res.status}`)
+    // Best-effort: surface the server's structured error body ({error,
+    // message, details} — see ExecuteError / catalog_routes.py) instead of
+    // an opaque status code. Falls back to the bare status when the body
+    // isn't JSON or parsing fails for any reason.
+    let detail: string | undefined
+    try {
+      const body = (await res.clone().json()) as { error?: string; message?: string }
+      detail = body?.message || body?.error
+    } catch {
+      // non-JSON or empty body — fall back to the generic message below
+    }
+    throw new Error(detail ? `Request failed: ${res.status} (${detail})` : `Request failed: ${res.status}`)
   }
 
   return parseJsonSafe<T>(res)
