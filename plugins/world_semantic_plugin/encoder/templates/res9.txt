@@ -1,0 +1,5 @@
+# res9 — local detail (default game res)
+HEX {hex_id} res={res} ring={ring} objects={object_count} biome={biome} elev={elevation_band}
+{summary}
+detail: {object_lines}
+tags={tags}

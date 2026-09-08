@@ -1,0 +1,84 @@
+{
+  "hero": {
+    "name": "Andrew Liang (the cat)",
+    "tagline": "AI Systems Architect · Cloud Infra & DevOps · Mobile & Platform Engineering",
+    "pitch": "High-impact full-stack systems builder. Reduced AWS costs from $4k → $2.8k/mo (−30%), built a greenfield MCP gateway (42 tools), and shipped a production mobile app (531+ commits).",
+    "links": [
+      {
+        "label": "GitHub Profile",
+        "href": "https://github.com/CooLguNxDD"
+      },
+      {
+        "label": "Whiskers Agent Repo",
+        "href": "https://github.com/CooLguNxDD/Open-Cat-Tunnel-MCP"
+      },
+      {
+        "label": "CatPortfolio Repo",
+        "href": "https://github.com/CooLguNxDD/CatPortfolio"
+      }
+    ]
+  },
+  "quick_actions": [
+    {
+      "label": "Infra work",
+      "prompt": "Show me your infra / SRE work",
+      "audience": "peer"
+    },
+    {
+      "label": "Deepest system",
+      "prompt": "What is the deepest system you built?",
+      "audience": "hiring-manager"
+    },
+    {
+      "label": "Recent ship",
+      "prompt": "What did you ship last month?",
+      "audience": "default"
+    }
+  ],
+  "audiences": {},
+  "layout_presets": {
+    "showcase": {
+      "audience": "peer",
+      "theme": "neon",
+      "star_query": "architecture systems design impact",
+      "star_k": 3,
+      "max_projects": 8,
+      "sections": ["hero", "kpiGrid", "cards", "starStory"]
+    },
+    "minimal": {
+      "audience": "recruiter",
+      "theme": "paper",
+      "star_query": "measurable impact results delivery",
+      "star_k": 1,
+      "max_projects": 4,
+      "sections": ["hero", "kpiGrid", "cards"]
+    },
+    "deep-dive": {
+      "audience": "hiring-manager",
+      "theme": "cozy",
+      "star_query": "ownership tradeoffs architecture leadership",
+      "star_k": 3,
+      "max_projects": 6,
+      "sections": ["hero", "starStory", "cards", "kpiGrid"]
+    }
+  },
+  "design_tokens": {
+    "theme": {
+      "name": "Cat Portfolio — Cozy Cyberpunk",
+      "color_space": "oklch",
+      "default_theme": "cozy",
+      "rules": [
+        "Components use CSS custom properties injected by ThemeProvider — never hardcode colors.",
+        "All color tokens are OKLCH.",
+        "Radii, shadows, fonts, padding come from theme vars."
+      ]
+    },
+    "typography": {
+      "family": "Geist Variable (via @fontsource-variable/geist)"
+    },
+    "motion": {
+      "library": "motion (motion/react)",
+      "rule": "Always respect useReducedMotion."
+    }
+  }
+}

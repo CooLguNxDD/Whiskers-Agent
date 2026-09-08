@@ -1,0 +1,1165 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Jules REST API",
+    "description": "The Jules REST API allows you to programmatically create and manage coding sessions, monitor progress, and retrieve results.",
+    "version": "v1alpha"
+  },
+  "servers": [
+    {
+      "url": "https://jules.googleapis.com",
+      "description": "Base URL for all API requests"
+    }
+  ],
+  "paths": {
+    "/v1alpha/sources": {
+      "get": {
+        "summary": "List Sources",
+        "description": "Lists all sources (repositories) connected to your account.",
+        "operationId": "ListSources",
+        "parameters": [
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "Number of sources to return (1-100). Defaults to 30.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "description": "Page token from a previous ListSources response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "description": "Filter expression based on AIP-160 (e.g., 'name=sources/source1 OR name=sources/source2').",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSourcesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sources/{sourceId}": {
+      "get": {
+        "summary": "Get a Source",
+        "description": "Retrieves a single source by ID.",
+        "operationId": "GetSource",
+        "parameters": [
+          {
+            "name": "sourceId",
+            "in": "path",
+            "required": true,
+            "description": "The structural ID element of the source name.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Source"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions": {
+      "get": {
+        "summary": "List Sessions",
+        "description": "Lists all sessions for the authenticated user.",
+        "operationId": "ListSessions",
+        "parameters": [
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "Number of sessions to return (1-100). Defaults to 30.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "description": "Page token from a previous ListSessions response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListSessionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a Session",
+        "description": "Creates a new session to start a coding task.",
+        "operationId": "CreateSession",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "prompt"
+                ],
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "description": "The task description for Jules to execute."
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "Optional title for the session. If not provided, the system will generate one."
+                  },
+                  "sourceContext": {
+                    "$ref": "#/components/schemas/SourceContext"
+                  },
+                  "requirePlanApproval": {
+                    "type": "boolean",
+                    "description": "If true, plans require explicit approval before execution. If not set, plans are auto-approved."
+                  },
+                  "automationMode": {
+                    "$ref": "#/components/schemas/AutomationMode"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions/{sessionId}": {
+      "get": {
+        "summary": "Get a Session",
+        "description": "Retrieves a single session by ID.",
+        "operationId": "GetSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a Session",
+        "description": "Deletes a session.",
+        "operationId": "DeleteSession",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Returns an empty response on success."
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions/{sessionId}:sendMessage": {
+      "post": {
+        "summary": "Send a Message",
+        "description": "Sends a message from the user to an active session. Use this endpoint to provide feedback, answer questions, or give additional instructions to Jules during an active session.",
+        "operationId": "SendMessage",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendMessageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions/{sessionId}:approvePlan": {
+      "post": {
+        "summary": "Approve a Plan",
+        "description": "Approves a pending plan in a session. This endpoint is only needed when requirePlanApproval was set to true when creating the session.",
+        "operationId": "ApprovePlan",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Empty request body",
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovePlanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions/{sessionId}/activities": {
+      "get": {
+        "summary": "List Activities",
+        "description": "Lists all activities for a session.",
+        "operationId": "ListActivities",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "description": "The parent session ID.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "Number of activities to return (1-100). Defaults to 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50
+            }
+          },
+          {
+            "name": "pageToken",
+            "in": "query",
+            "description": "Page token from a previous ListActivities response.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListActivitiesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    },
+    "/v1alpha/sessions/{sessionId}/activities/{activityId}": {
+      "get": {
+        "summary": "Get an Activity",
+        "description": "Retrieves a single activity by ID.",
+        "operationId": "GetActivity",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "activityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Activity"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/403Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/404NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/429RateLimited"
+          },
+          "500": {
+            "$ref": "#/components/responses/500ServerError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-goog-api-key",
+        "description": "Get your API key from jules.google.com/settings."
+      }
+    },
+    "security": [
+      {
+        "ApiKeyAuth": []
+      }
+    ],
+    "responses": {
+      "400BadRequest": {
+        "description": "Bad request - invalid parameters",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "401Unauthorized": {
+        "description": "Unauthorized - invalid or missing token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "403Forbidden": {
+        "description": "Forbidden - insufficient permissions",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "404NotFound": {
+        "description": "Not found - resource doesn't exist",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "429RateLimited": {
+        "description": "Rate limited - too many requests",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "500ServerError": {
+        "description": "Server error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Session": {
+        "type": "object",
+        "required": [
+          "prompt",
+          "sourceContext"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The full resource name (e.g., 'sessions/{session}')."
+          },
+          "id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The session ID."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "The task description for Jules to execute."
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title. If not provided, the system generates one."
+          },
+          "state": {
+            "$ref": "#/components/schemas/SessionState"
+          },
+          "url": {
+            "type": "string",
+            "readOnly": true,
+            "description": "URL to view the session in the Jules web app."
+          },
+          "sourceContext": {
+            "$ref": "#/components/schemas/SourceContext"
+          },
+          "requirePlanApproval": {
+            "type": "boolean",
+            "writeOnly": true,
+            "description": "If true, plans require explicit approval."
+          },
+          "automationMode": {
+            "$ref": "#/components/schemas/AutomationMode"
+          },
+          "outputs": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "$ref": "#/components/schemas/SessionOutput"
+            },
+            "description": "Results of the session (e.g., pull requests)."
+          },
+          "createTime": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "description": "When the session was created."
+          },
+          "updateTime": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "description": "When the session was last updated."
+          }
+        }
+      },
+      "SessionState": {
+        "type": "string",
+        "enum": [
+          "STATE_UNSPECIFIED",
+          "QUEUED",
+          "PLANNING",
+          "AWAITING_PLAN_APPROVAL",
+          "AWAITING_USER_FEEDBACK",
+          "IN_PROGRESS",
+          "PAUSED",
+          "FAILED",
+          "COMPLETED"
+        ],
+        "description": "Enum representing the current state of a session."
+      },
+      "AutomationMode": {
+        "type": "string",
+        "enum": [
+          "AUTOMATION_MODE_UNSPECIFIED",
+          "AUTO_CREATE_PR"
+        ],
+        "description": "Enum for session automation settings. AUTOMATION_MODE_UNSPECIFIED acts as no automation (default)."
+      },
+      "Activity": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The full resource name (e.g., 'sessions/{session}/activities/{activity}')."
+          },
+          "id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The activity ID."
+          },
+          "originator": {
+            "type": "string",
+            "enum": [
+              "user",
+              "agent",
+              "system"
+            ],
+            "description": "The entity that created this activity."
+          },
+          "description": {
+            "type": "string",
+            "readOnly": true,
+            "description": "A description of this activity."
+          },
+          "createTime": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "description": "When the activity was created."
+          },
+          "artifacts": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "$ref": "#/components/schemas/Artifact"
+            },
+            "description": "Artifacts produced by this activity."
+          },
+          "planGenerated": {
+            "$ref": "#/components/schemas/PlanGenerated"
+          },
+          "planApproved": {
+            "$ref": "#/components/schemas/PlanApproved"
+          },
+          "userMessaged": {
+            "$ref": "#/components/schemas/UserMessaged"
+          },
+          "agentMessaged": {
+            "$ref": "#/components/schemas/AgentMessaged"
+          },
+          "progressUpdated": {
+            "$ref": "#/components/schemas/ProgressUpdated"
+          },
+          "sessionCompleted": {
+            "$ref": "#/components/schemas/SessionCompleted"
+          },
+          "sessionFailed": {
+            "$ref": "#/components/schemas/SessionFailed"
+          }
+        }
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The full resource name (e.g., 'sources/{source}')."
+          },
+          "id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The source ID."
+          },
+          "githubRepo": {
+            "$ref": "#/components/schemas/GitHubRepo"
+          }
+        }
+      },
+      "Plan": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Unique ID for this plan within a session."
+          },
+          "steps": {
+            "type": "array",
+            "readOnly": true,
+            "items": {
+              "$ref": "#/components/schemas/PlanStep"
+            },
+            "description": "The steps in the plan."
+          },
+          "createTime": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true,
+            "description": "When the plan was created."
+          }
+        }
+      },
+      "PlanStep": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Unique ID for this step within a plan."
+          },
+          "index": {
+            "type": "integer",
+            "format": "int32",
+            "readOnly": true,
+            "description": "0-based index in the plan."
+          },
+          "title": {
+            "type": "string",
+            "readOnly": true,
+            "description": "The title of the step."
+          },
+          "description": {
+            "type": "string",
+            "readOnly": true,
+            "description": "Detailed description of the step."
+          }
+        }
+      },
+      "Artifact": {
+        "type": "object",
+        "properties": {
+          "changeSet": {
+            "$ref": "#/components/schemas/ChangeSet"
+          },
+          "bashOutput": {
+            "$ref": "#/components/schemas/BashOutput"
+          },
+          "media": {
+            "$ref": "#/components/schemas/Media"
+          }
+        }
+      },
+      "ChangeSet": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "The source this change set applies to. Format: sources/{source}"
+          },
+          "gitPatch": {
+            "$ref": "#/components/schemas/GitPatch"
+          }
+        }
+      },
+      "GitPatch": {
+        "type": "object",
+        "properties": {
+          "baseCommitId": {
+            "type": "string",
+            "description": "The commit ID the patch should be applied to."
+          },
+          "unidiffPatch": {
+            "type": "string",
+            "description": "The patch in unified diff format."
+          },
+          "suggestedCommitMessage": {
+            "type": "string",
+            "description": "A suggested commit message for the patch."
+          }
+        }
+      },
+      "BashOutput": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The bash command that was executed."
+          },
+          "output": {
+            "type": "string",
+            "description": "Combined stdout and stderr output."
+          },
+          "exitCode": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The exit code of the command."
+          }
+        }
+      },
+      "Media": {
+        "type": "object",
+        "properties": {
+          "mimeType": {
+            "type": "string",
+            "description": "The MIME type of the media (e.g., 'image/png')."
+          },
+          "data": {
+            "type": "string",
+            "format": "byte",
+            "description": "Base64-encoded media data."
+          }
+        }
+      },
+      "GitHubRepo": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "type": "string",
+            "description": "The repository owner (user or organization)."
+          },
+          "repo": {
+            "type": "string",
+            "description": "The repository name."
+          },
+          "isPrivate": {
+            "type": "boolean",
+            "description": "Whether the repository is private."
+          },
+          "defaultBranch": {
+            "$ref": "#/components/schemas/GitHubBranch"
+          },
+          "branches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitHubBranch"
+            },
+            "description": "List of active branches."
+          }
+        }
+      },
+      "GitHubBranch": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "description": "The branch name."
+          }
+        }
+      },
+      "GitHubRepoContext": {
+        "type": "object",
+        "required": [
+          "startingBranch"
+        ],
+        "properties": {
+          "startingBranch": {
+            "type": "string",
+            "description": "The branch to start the session from."
+          }
+        }
+      },
+      "SourceContext": {
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "The source resource name. Format: sources/{source}"
+          },
+          "githubRepoContext": {
+            "$ref": "#/components/schemas/GitHubRepoContext"
+          }
+        }
+      },
+      "SessionOutput": {
+        "type": "object",
+        "properties": {
+          "pullRequest": {
+            "$ref": "#/components/schemas/PullRequest"
+          }
+        }
+      },
+      "PullRequest": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL of the pull request."
+          },
+          "title": {
+            "type": "string",
+            "description": "The title of the pull request."
+          },
+          "description": {
+            "type": "string",
+            "description": "The description of the pull request."
+          }
+        }
+      },
+      "PlanGenerated": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "$ref": "#/components/schemas/Plan"
+          }
+        }
+      },
+      "PlanApproved": {
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string",
+            "description": "The ID of the approved plan."
+          }
+        }
+      },
+      "UserMessaged": {
+        "type": "object",
+        "properties": {
+          "userMessage": {
+            "type": "string",
+            "description": "The message content."
+          }
+        }
+      },
+      "AgentMessaged": {
+        "type": "object",
+        "properties": {
+          "agentMessage": {
+            "type": "string",
+            "description": "The message content."
+          }
+        }
+      },
+      "ProgressUpdated": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "The title of the update."
+          },
+          "description": {
+            "type": "string",
+            "description": "Details about the progress."
+          }
+        }
+      },
+      "SessionCompleted": {
+        "type": "object",
+        "description": "The session finished successfully. No additional properties."
+      },
+      "SessionFailed": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "The reason for the failure."
+          }
+        }
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "The message to send to the session."
+          }
+        }
+      },
+      "SendMessageResponse": {
+        "type": "object",
+        "description": "Response from sending a message. Empty response on success."
+      },
+      "ApprovePlanRequest": {
+        "type": "object",
+        "description": "Request to approve a plan. Empty request body."
+      },
+      "ApprovePlanResponse": {
+        "type": "object",
+        "description": "Response from approving a plan. Empty response on success."
+      },
+      "ListSessionsResponse": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "description": "Token for the next page of results."
+          }
+        }
+      },
+      "ListActivitiesResponse": {
+        "type": "object",
+        "properties": {
+          "activities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Activity"
+            }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "description": "Token for the next page of results."
+          }
+        }
+      },
+      "ListSourcesResponse": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Source"
+            }
+          },
+          "nextPageToken": {
+            "type": "string",
+            "description": "Token for the next page of results."
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "integer"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

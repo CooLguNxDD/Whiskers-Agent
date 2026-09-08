@@ -1,0 +1,12 @@
+{
+  "adapter": "auto",
+  "title": "Example API",
+  "api_version": "1.0.0",
+  "server": "http://localhost:8080",
+  "base_path": "",
+  "router_prefixes": {},
+  "middleware_security": {},
+  "security_schemes": {},
+  "ignored_path_segments": ["api"],
+  "source_globs": []
+}

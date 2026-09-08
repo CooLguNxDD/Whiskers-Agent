@@ -1,0 +1,102 @@
+{
+  "effort_map": {
+    "low": "fast",
+    "medium": "balanced",
+    "high": "strongest",
+    "max": "strongest"
+  },
+  "roles": [
+    {
+      "role_id": "triage",
+      "description": "Classify user turn as chat | classic | specialist.",
+      "ladder": [{"selector": "core"}],
+      "validate": {
+        "require_json": true,
+        "enum_field": "mode",
+        "enum_values": ["chat", "classic", "specialist", "task"]
+      },
+      "entry_conditions": [{"field": "retriage_context", "op": "present"}],
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "chat",
+      "description": "Conversational reply node. Selection only — no validator, escalation never fires.",
+      "ladder": [{"selector": "core"}],
+      "escalate_on_invalid": false,
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "decompose",
+      "description": "Break a complex goal into sub-tasks.",
+      "ladder": [{"selector": "core"}],
+      "validate": {"require_json": true},
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "planner_goal",
+      "description": "GOAP goal-fact extraction pass.",
+      "ladder": [{"selector": "core"}],
+      "validate": {"require_json": true, "required_keys": ["goal"]},
+      "entry_conditions": [
+        {"field": "repeat_failure_count", "op": "gt", "value": 0},
+        {"field": "replan_context", "op": "truthy"}
+      ],
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "planner_linear",
+      "description": "Linear LLM planner fallback when GOAP A* finds no path.",
+      "ladder": [{"selector": "core"}],
+      "validate": {"require_json": true},
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "goal_verifier",
+      "description": "GOAP goal-loop verifier (goal_check).",
+      "ladder": [{"selector": "core"}],
+      "validate": {"require_json": true},
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "summary",
+      "description": "Final-turn synthesis against the never-mutated original_query.",
+      "ladder": [{"selector": "core"}],
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "reranker",
+      "description": "Candidate reranking for embedder-stage retrieval.",
+      "ladder": [{"selector": "core"}],
+      "validate": {"require_json": true, "required_keys": ["ranked_indices"]},
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "builder",
+      "description": "YAML instruction-set compiler. Selection only.",
+      "ladder": [{"selector": "core"}],
+      "escalate_on_invalid": false,
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "step_resolver",
+      "description": "Per-step argument resolution. Selection only.",
+      "ladder": [{"selector": "core"}],
+      "escalate_on_invalid": false,
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "agent_default",
+      "description": "Default model for AgentSpec.llm_kind == 'core' (agent_loop backbone).",
+      "ladder": [{"selector": "core"}],
+      "escalate_on_invalid": false,
+      "terminal_fallback": "ctx_llm"
+    },
+    {
+      "role_id": "specialist",
+      "description": "Default model for the specialist stack (FlowSpec agentic stages, domain runners, generic pipeline) when no manifest/stage effort is declared.",
+      "ladder": [{"selector": "core"}],
+      "escalate_on_invalid": false,
+      "terminal_fallback": "ctx_llm"
+    }
+  ]
+}

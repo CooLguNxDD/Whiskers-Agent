@@ -1,0 +1,14 @@
+{
+  "_comment": "Per-plugin env-var defaults injected at plugin load via os.environ.setdefault. The host environment (.env / docker-compose) ALWAYS overrides these; empty values are skipped (never clobber code defaults). Edit here to change defaults without touching .env. Sections: common (shared), sandbox (native exec_command), terminal (interactive PTY relay). Restart the server to apply changes.",
+  "common": {
+    "CAT_PRIVILEGED_BINARIES": "claude,codex,grok,agy"
+  },
+  "sandbox": {
+    "CAT_SANDBOX_ALLOWED_BINARIES": "ls,cat,echo,pwd,grep,find,git,python,python3,node,npm,grok,agy,claude",
+    "CAT_SANDBOX_WORKDIR": ""
+  },
+  "terminal": {
+    "CAT_TERMINAL_ALLOWED_BINARIES": "claude,git,npm,npx,node,python,python3,ls,cat,echo,pwd,which,clear,grep,find,code,agy,grok",
+    "MCP_SERVER_URL": ""
+  }
+}

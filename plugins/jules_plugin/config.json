@@ -1,0 +1,8 @@
+{
+  "project_id": 1,
+  "name": "jules_plugin",
+  "version": "1.0.0",
+  "tool_prefix": "jules",
+  "tools_dir": "src/mcp-tools-context",
+  "valid_ops": ["read", "write_update", "delete"]
+}

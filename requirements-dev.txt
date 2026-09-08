@@ -1,0 +1,7 @@
+# Dev / CI lint + type tools (not installed in production image by default).
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+ruff>=0.9.0
+mypy>=1.14.0
+types-PyYAML>=6.0.0
+types-requests>=2.31.0

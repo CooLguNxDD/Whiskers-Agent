@@ -1,0 +1,68 @@
+fastmcp>=3.0.0
+mcp>=1.0.0
+requests>=2.31.0
+httpx>=0.27.0
+PyJWT>=2.8.0
+bcrypt>=4.0.0
+# core_graph/states.py: TypedDict multi-inheritance __orig_bases__ backport (Python <3.12)
+typing_extensions>=4.12.0
+pyotp>=2.9.0
+argon2-cffi>=23.1.0
+python-dotenv>=1.0.0
+# OAuthService.validate_token public-key TTL cache (class-level TTLCache)
+cachetools>=5.0.0
+
+# LangGraph agent (used by agent.py)
+langgraph>=0.2.0
+langchain-core>=0.3.0
+# Postgres checkpointer for cross-turn playground chat memory (thread_id=session_id)
+langgraph-checkpoint-postgres>=3.1.0
+langchain-mcp-adapters>=0.1.0
+
+# LLM providers – install at least one
+langchain-openai>=0.3.0
+langchain-anthropic>=0.3.0      # uncomment for Anthropic support
+langchain-google-genai>=2.0.0   # Gemini + Gemini Vertex AI Express (vertexai=True)
+
+# PostgreSQL + pgvector data layer
+psycopg[binary,pool]>=3.1
+pgvector>=0.3.0
+openai>=1.0
+
+# world_semantic_plugin — H3 spatial indexing (lat/lng patch projection)
+h3>=4.0.0
+
+# Tools generator (optional, for YAML config support)
+pyyaml>=6.0
+
+# Database (OAuth persistence via PostgreSQL + Alembic migrations)
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+psycopg2-binary>=2.9.0
+
+# Rich terminal output (credential TUI, terminal/script/manage_credentials.py)
+rich>=13.0.0
+
+# Development: auto-reload on file changes
+watchfiles>=0.20.0
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+jsonschema>=4.20.0
+httpx>=0.27.0
+
+# MinIO Client & PDF PDF generation dependencies
+minio>=7.2.0
+reportlab>=4.0.0
+
+# SVG -> PNG rasterization for baked portfolio visual assets (Phase 6c).
+# Needs libcairo2 + libpangocairo-1.0-0 in the image (see Dockerfile) --
+# chosen over Playwright/chromium (~20 apt libs, hundreds of MB) since the
+# only thing rasterized is svg_render.py's own deterministic markup.
+cairosvg>=2.7.0
+
+# Keyless web search (search_plugin web_search fallback; multi-engine metasearch)
+ddgs>=9.0.0
+
+# Docker SDK (setup TUI restart-server control via /var/run/docker.sock)
+docker>=7.0.0
+

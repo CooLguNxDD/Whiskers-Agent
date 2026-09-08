@@ -1,0 +1,133 @@
+[
+  {
+    "name": "create_session",
+    "description": "Create a Session",
+    "inputSchema": {
+      "properties": {
+        "prompt": {
+          "description": "The task description for Jules to execute.",
+          "title": "Prompt",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional title for the session. If not provided, the system will generate one.",
+          "title": "Title"
+        },
+        "sourceContext": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sourcecontext",
+          "description": "JSON-encoded object matching the SourceContext schema (pass as a JSON string, not a nested object). Required key 'source': the source resource name, format 'sources/{source}' (get valid values from list_sources, e.g. 'sources/github/{owner}/{repo}'). Optional key 'githubRepoContext': object with required 'startingBranch' (the branch to start the session from). Example value for this field: {\"source\": \"sources/github/octocat/hello-world\", \"githubRepoContext\": {\"startingBranch\": \"main\"}}"
+        },
+        "requirePlanApproval": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "If true, plans require explicit approval before execution. If not set, plans are auto-approved.",
+          "title": "Requireplanapproval"
+        },
+        "automationMode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Automationmode",
+          "description": "Enum for session automation settings. Allowed values: 'AUTOMATION_MODE_UNSPECIFIED' (no automation, default), 'AUTO_CREATE_PR' (automatically create a pull request when the session completes)."
+        }
+      },
+      "required": [
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "CreateSession",
+      "method": "POST",
+      "path": "/v1alpha/sessions",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "approve_plan",
+    "description": "Approve a Plan",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "ApprovePlan",
+      "method": "POST",
+      "path": "/v1alpha/sessions/{sessionId}:approvePlan",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  },
+  {
+    "name": "send_message",
+    "description": "Send a Message",
+    "inputSchema": {
+      "properties": {
+        "sessionId": {
+          "title": "Sessionid",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string",
+          "description": "The message to send to the session."
+        }
+      },
+      "required": [
+        "sessionId",
+        "prompt"
+      ],
+      "type": "object"
+    },
+    "_meta": {
+      "operationId": "SendMessage",
+      "method": "POST",
+      "path": "/v1alpha/sessions/{sessionId}:sendMessage",
+      "tags": [],
+      "security": [],
+      "query": []
+    }
+  }
+]

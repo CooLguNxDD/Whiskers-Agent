@@ -1,0 +1,8 @@
+{
+  "name": "portfolio-gen",
+  "version": "0.2.0",
+  "description": "Portfolio generation harness: layout.yaml authoring, block component generation, compile/verify gate, and PR conventions for the CatPortfolio repo. Includes external context sourcing via GitHub, URL, Notion, and Google Docs (OCT proxy or CI fallback). Works locally and headless in GitHub Actions.",
+  "author": {
+    "name": "Whiskers Agent"
+  }
+}

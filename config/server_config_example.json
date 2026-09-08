@@ -1,0 +1,175 @@
+{
+  "_comment": "Whiskers Agent MCP Server operational configuration. Secrets (API URL, credentials, keys) stay in .env / environment variables.",
+
+  "context": {
+    "mcp_server_name": "whiskers_agent",
+    "mcp_instructions_base": "You are an internal tool executor. \n\nPARALLELISM RULE: When a request contains multiple INDEPENDENT, DISTINCT goals (goals that don't depend on each other's output), emit ALL tool calls in a single response. Do not wait for one to complete before calling the next.\n\nIMPORTANT SCOPE OF PARALLELISM RULE: A single operation repeated over a list (create N of X, do the same thing for each item in a set) is NOT multiple independent goals — it is ONE run_graph call, never N individual tool calls. Let the server fan out.\n\nIndependent = no output from task A is needed as input to task B, AND the tasks are genuinely distinct goals.\nSequential = task B needs task A's result first.\n\nNEVER fabricate required field values.\n\nWhiskers Agent MCP platform — orchestrate plugin tools, proxy integrations, and multi-step workflows via run_graph.\n\nOFFLOAD DIRECTIVE: For any multi-step, batch, or repeated request, call run_graph ONCE with the whole goal as user_message. run_graph does GOAP planning, fan-out, and replanning server-side. Do NOT loop the underlying plugin tools yourself.\n\nExample (CORRECT): 'create 5 Jules sessions named A B C D E' → one run_graph(user_message='create 5 Jules sessions named A B C D E')\nExample (WRONG): five separate julescreate_session calls.\n\nNote: On some connections raw plugin and proxy tools may also be directly visible alongside run_graph. Even so, multi-step, batch, or repeated work must go through run_graph so the server's GOAP planner owns the plan and fan-out. Direct single-tool calls are acceptable only for a genuine one-shot single action (e.g. a single read/lookup with no follow-on steps).\n\nUse discover_tools (optionally with a query) to preview the live catalog of actions run_graph can orchestrate. discover_tools is optional and never a required precursor to run_graph.\n\nKeep platform rules: never fabricate entity data; require missing fields via need_input; bulk actions need confirmation.",
+    "semantic_instructions_suffix": " Semantic search tools may be available per loaded plugin. Prefer semantic search when offered; upsert indexed content after writes. When semantic tools return no result, fall back to non-semantic tools so the user still gets a response.",
+    "platform_rules": "- NEVER fabricate entity data (names, IDs, or other sensitive values).\n- If required fields are missing, return status=need_input.\n- Bulk operations require explicit confirmation.",
+    "platform_description": "the Whiskers Agent MCP platform"
+  },
+
+  "pagination": {
+    "safe_default_page_size": 20,
+    "safe_default_page_index": 1,
+    "max_recommended_page_size": 100
+  },
+  "oauth": {
+    "access_token_ttl_seconds": 900,
+    "refresh_token_ttl_seconds": 604800,
+    "auth_code_ttl_seconds": 600,
+    "plugin_external_oauth_token_default_ttl_seconds": 43200,
+    "plugin_direct_auth_token_default_ttl_seconds": 43200,
+    "valid_scopes": [
+      "agy",
+      "antigravity"
+    ],
+    "max_register_body_bytes": 65536
+  },
+  "gateway": {
+    "_comment": "run_graph unified mode. When run_graph_unified=true, only GATEWAY_ALWAYS_VISIBLE tools remain on MCP list_tools/call_tool; every other registered tool is hidden from direct exposure but stays reachable internally via run_graph. Selective tool_config.is_hidden / meta.tools_hidden still apply when unified is false. One platform tool = unlimited tools behind the scenes.",
+    "run_graph_unified": false,
+    "always_visible_tools": [
+      "run_graph",
+      "discover_tools",
+      "authenticate",
+      "complete_authentication",
+      "fetch_artifact"
+    ]
+  },
+  "graph": {
+    "long_chain_threshold": 3,
+    "confidence_execute_threshold": 0.7,
+    "confidence_confirm_threshold": 0.5,
+    "max_replans": 2,
+    "goap_max_steps": 12,
+    "candidate_top_k": 25,
+    "decompose_first": true,
+    "max_subtasks": 4,
+    "candidate_pool_max": 30,
+    "max_iterations": 20,
+    "model_roles_enabled": false,
+    "max_fanout": 10,
+    "fanout_concurrency": 5,
+    "max_skill_file_chars": 6500,
+    "max_proxy_custom_description_chars": 2000,
+    "proxy_response_shaping": true,
+    "direct_call_shaping": true,
+    "direct_call_shaping_exclude": [],
+    "max_skill_total_chars": 10000,
+    "max_formatted_plugin_skills_chars": 7000,
+    "elicit_keepalive_interval_s": 15,
+    "envelope_budget_bytes": 450000,
+    "artifact_offload": {
+      "enabled": true,
+      "min_field_bytes": 2000,
+      "max_artifacts_per_round": 8,
+      "url_expiry_seconds": 3600,
+      "fetch_default_max_chars": 1000000,
+      "preview_chars": 1500
+    },
+    "harness": {
+      "enabled": true,
+      "recipe_top_k": 3,
+      "anti_top_k": 3,
+      "similarity_threshold": 0.78,
+      "max_block_chars": 3500,
+      "include_user_memory": false,
+      "write_recipes": true,
+      "write_anti_patterns": true
+    },
+    "triage": {
+      "harness_memory_enabled": false,
+      "harness_memory_top_k": 3
+    },
+    "hybrid_search": {
+      "enabled": true,
+      "dense_top_n": 30,
+      "sparse_top_n": 30,
+      "rrf_k": 60,
+      "fused_top_n": 30,
+      "collections": {
+        "search": true,
+        "job_preferences": true
+      }
+    },
+    "rerank": {
+      "enabled": false,
+      "top_n_in": 30,
+      "top_k_out": 12,
+      "timeout_s": 8
+    }
+  },
+  "scheduled_jobs": {
+    "portfolio_discovery": {
+      "enabled": false,
+      "interval_seconds": 21600
+    },
+    "content_sync": {
+      "enabled": false
+    },
+    "artifact_sweep": {
+      "enabled": true,
+      "interval_seconds": 3600,
+      "retention_hours": 720,
+      "buckets": ["whiskers-artifacts"]
+    },
+    "checkpoint_sweep": {
+      "enabled": true,
+      "interval_seconds": 3600,
+      "stale_hours": 24
+    },
+    "telemetry_sweep": {
+      "enabled": true,
+      "interval_seconds": 3600,
+      "retention_days": 30
+    },
+    "portfolio_ask_turns_sweep": {
+      "enabled": true,
+      "interval_seconds": 3600,
+      "retention_days": 30
+    }
+  },
+  "security": {
+    "scope_enforcement_enabled": true,
+    "scope_enforcement_mode": "enforce",
+    "null_scopes_policy": "deny",
+    "_comment_force_execute": "run_graph defaults force_execute=true for any authenticated principal. Scopes authorize each graph step. force_execute_roles is legacy and no longer gates the default.",
+    "force_execute_roles": ["master", "admin", "operator", "viewer"],
+    "admin_bypass_roles": ["master", "admin"],
+    "roles": {
+      "master": { "scopes": "*" },
+      "admin": { "scopes": ["admin"] },
+      "operator": {
+        "scopes": [
+          "core:whiskers.console:write",
+          "core:whiskers.plugins:write",
+          "core:whiskers.proxy:write",
+          "core:whiskers.analytics:read",
+          "core:graph:write",
+          "core:config:read",
+          "core:apikey:read"
+        ],
+        "include_plugin_tokens": true
+      },
+      "viewer": {
+        "scopes": [
+          "core:whiskers.console:read",
+          "core:whiskers.plugins:read",
+          "core:whiskers.proxy:read",
+          "core:whiskers.analytics:read",
+          "core:graph:read"
+        ],
+        "include_plugin_tokens": "read"
+      }
+    }
+  },
+  "rate_limit": {
+    "enabled": true,
+    "requests_per_window": 30,
+    "window_seconds": 60,
+    "path_prefixes": ["/mcp", "/api/portfolio"],
+    "trust_proxy": false,
+    "max_tracked_ips": 10000
+  }
+}

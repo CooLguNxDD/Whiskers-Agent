@@ -1,0 +1,4 @@
+# res0 — coarsest continent-scale summary
+HEX {hex_id} res={res} objects={object_count}
+{summary}
+tags={tags}

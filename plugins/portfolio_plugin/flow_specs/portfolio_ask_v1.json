@@ -1,0 +1,79 @@
+{
+  "flow_id": "portfolio_ask_v1",
+  "name": "Portfolio Visitor Ask (surgical block patch)",
+  "claims": {
+    "goal_classes": ["scoped_ask"],
+    "any_keywords": [
+      "ask", "tell me about", "do you have", "show me", "experience with",
+      "fish", "fish tank", "project", "what did you build", "walk me through"
+    ]
+  },
+  "requires": [],
+  "provides": ["did:answer_ask", "have:ask_blocks"],
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "question": {"type": "string"},
+      "view": {"type": "string"},
+      "block_index": {"type": "array"},
+      "tank_slugs": {"type": "array"},
+      "dag": {"type": "object"},
+      "time_span": {"type": "object"},
+      "add_slugs": {"type": "array"},
+      "visitor_session_id": {"type": "string"}
+    },
+    "required": ["question"]
+  },
+  "stages": [
+    {
+      "id": "route",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__route_portfolio_ask",
+      "reads": ["question", "view", "block_index", "tank_slugs", "add_slugs", "visitor_session_id"],
+      "writes": ["ask_plan", "intent"],
+      "required_outputs": ["ask_plan"],
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "build",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__build_ask_overlay",
+      "reads": ["ask_plan", "question", "block_index", "tank_slugs", "dag", "time_span", "visitor_session_id"],
+      "writes": [
+        "blocks", "patched_block_ids", "dag", "focus_slug",
+        "highlight_slugs", "pending_job", "warnings", "overlay_status",
+        "recommendations", "fish_pool", "pool_id"
+      ],
+      "required_outputs": ["blocks"],
+      "max_seconds": 45,
+      "on_fail": "fail_closed"
+    },
+    {
+      "id": "answer",
+      "kind": "agentic",
+      "tool_globs": [
+        "portfolio_plugin__search_portfolio_context",
+        "portfolio_plugin__get_project_context"
+      ],
+      "reads": ["question", "ask_plan", "focus_slug", "highlight_slugs", "fish_pool", "recommendations"],
+      "writes": ["answer_markdown"],
+      "on_fail": "continue"
+    },
+    {
+      "id": "answer_fallback",
+      "kind": "deterministic",
+      "op": "portfolio_plugin/portfolio_plugin__ensure_ask_answer",
+      "reads": [
+        "question",
+        "focus_slug",
+        "highlight_slugs",
+        "answer_markdown",
+        "overlay_status",
+        "fish_pool",
+        "recommendations"
+      ],
+      "writes": ["answer_markdown"],
+      "on_fail": "continue"
+    }
+  ]
+}

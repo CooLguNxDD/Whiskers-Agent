@@ -1,0 +1,5 @@
+# res5 — regional
+HEX {hex_id} res={res} ring={ring} objects={object_count} biome={biome}
+{summary}
+objects: {object_names}
+tags={tags}

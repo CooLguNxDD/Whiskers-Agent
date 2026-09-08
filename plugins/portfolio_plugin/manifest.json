@@ -1,0 +1,230 @@
+{
+  "name": "portfolio_plugin",
+  "version": "1.0.0",
+  "tier": "free",
+  "description": "Portfolio layout generator: project records, STAR stories (pgvector), and deterministic layout.json composition for the Cat Portfolio frontend.",
+  "author": "Whiskers Agent",
+  "requires": [],
+  "capabilities": [
+    "portfolio_projects",
+    "portfolio_layout",
+    "star_stories",
+    "external_context",
+    "portfolio_bake",
+    "portfolio_discovery"
+  ],
+  "scopes": [
+    {
+      "token": "plugin:portfolio_plugin",
+      "description": "Full access to portfolio tools"
+    },
+    {
+      "token": "group:portfolio_plugin:read",
+      "description": "Read portfolio projects, context, layouts and recipes"
+    },
+    {
+      "token": "group:portfolio_plugin:write",
+      "description": "Operator writes: ingest, upsert, reconcile, bake"
+    },
+    {
+      "token": "group:portfolio_plugin:ask",
+      "description": "Visitor ask mode: route, overlay patch, context discovery and fish spawn"
+    }
+  ],
+  "gate": {
+    "core": ["core:graph:read"]
+  },
+  "schema": {
+    "migrations_path": "migrations",
+    "min_core_revision": "core_040",
+    "auto_migrate": true
+  },
+  "memory": [
+    {
+      "name": "context",
+      "backend": "search",
+      "description": "Discovered GitHub/Notion portfolio context for index-first compose",
+      "writable": true
+    },
+    {
+      "name": "layouts",
+      "backend": "search",
+      "description": "Juried winning LayoutPlan structures (recipe/audience/theme/bands/block_types, no props or prose) for the portfolio layout harness",
+      "writable": true
+    },
+    {
+      "name": "layout_antipatterns",
+      "backend": "search",
+      "description": "Juried failing LayoutPlan structures (best loser per round) with must_fix, for the portfolio layout harness",
+      "writable": true
+    }
+  ],
+  "skills": [
+    "skills/layout-plan-authoring.md",
+    "skills/context-discovery.md",
+    "skills/live-layout-enrichment.md"
+  ],
+  "optional_credentials": [
+    {
+      "key": "GITHUB_TOKEN",
+      "description": "GitHub personal access token. Optional \u2014 unauthenticated requests work at 60 req/h. Token raises limits and enables private repo access.",
+      "required": false
+    }
+  ],
+  "settings": {
+    "design_system": "default",
+    "specialist_agent": {
+      "enabled": true,
+      "domain": "portfolio",
+      "tool_globs": [
+        "portfolio_plugin/*",
+        "search_plugin/*web_search*",
+        "proxy_github*/*search*",
+        "proxy_github*/*list*",
+        "proxy_github*/*get*",
+        "proxy_Notion*/*search*",
+        "proxy_Notion*/*fetch*",
+        "proxy_notion*/*search*",
+        "proxy_notion*/*fetch*"
+      ],
+      "delegation": "domain_pipeline",
+      "comment": "Domain multi-phase pipeline (discover/compose/bake). Generic MCP specialist uses tool_globs when portfolio domain declines.",
+      "flow_specs": [
+        "flow_specs/portfolio_bake_v1.json",
+        "flow_specs/portfolio_ask_v1.json"
+      ]
+    },
+    "ingest_root": "/app/data/portfolio_ingest",
+    "fish_tank_enabled": true,
+    "fish_tank": {
+      "_comment": "Job-scoped bake roster only (bake_portfolio_for_job). The unscoped ?tank=1 snapshot and ask-mode overlays pass no roster_limit and keep showing the full active inventory. No project is exempt by tag.",
+      "job_roster_limit": 8,
+      "min_relevance": 2
+    },
+    "ask": {
+      "_comment": "Ask mode (portfolio_ask_v1): a visitor question patches 1-3 blocks instead of rebuilding the page. A discover miss waits on the job (discovery_budget_s) then spawns a virtual fish from indexed docs. discovery_index writes portfolio_plugin__context only — never portfolio_projects.",
+      "enabled": true,
+      "discovery_fallback": true,
+      "discovery_index": true,
+      "discovery_budget_s": 20,
+      "discovery_write_back": false,
+      "max_patch_blocks": 3,
+      "confidence_floor": 0.35,
+      "freeze_time_span": true,
+      "fish_pool": {"ttl_s": 600, "max_items": 8}
+    },
+    "display_copy": {
+      "fish_blurb_max_chars": 200,
+      "card_body_max_chars": 480,
+      "description_max_chars": 600,
+      "_comment": "Visitor-facing project copy caps. Inventory summary is seed only; author_display_copy reframes into fish_blurb / card_body / description."
+    },
+    "portfolio_layout": {
+      "mode": "auto",
+      "agentic_goal_classes": [
+        "redesign",
+        "bake_for_job"
+      ],
+      "jury_threshold": 7.5,
+      "max_plan_rounds": 3,
+      "jury_use_llm": false,
+      "direction_lock": true,
+      "design_system": "default",
+      "max_agent_steps": 16,
+      "max_agent_seconds": 120.0,
+      "structure_mode": "free",
+      "evidence_top_k_docs": 16,
+      "evidence_top_k_projects": 8,
+      "context_enrich": true,
+      "context_enrich_interactive": true,
+      "web_enrich": true,
+      "anti_skeleton_clone": true,
+      "layout_harness": {
+        "enabled": true,
+        "win_top_k": 3,
+        "loss_top_k": 3,
+        "similarity_threshold": 0.78,
+        "max_block_chars": 2000,
+        "min_score_to_record": 6.0,
+        "write_wins": false,
+        "write_losses": false,
+        "seed_from_memory": false
+      },
+      "skill_max_chars": 8000,
+      "evidence_max_chars": 6500,
+      "evidence_doc_chars": 700
+    },
+    "github_allowlist": {
+      "owners": [
+        "CooLguNxDD"
+      ],
+      "repos": [
+        "CooLguNxDD/Open-Cat-Tunnel-MCP",
+        "CooLguNxDD/CatPortfolio",
+        "CooLguNxDD/Fisoul",
+        "CooLguNxDD/World-procedural-generation-agent",
+        "CooLguNxDD/pullfrog-lemon-custom-build"
+      ]
+    },
+    "notion_allowlist": {
+      "databases": [],
+      "page_prefixes": []
+    },
+    "discovery": {
+      "enabled": true,
+      "write_back": true,
+      "strict_allowlist_repos": true,
+      "freshness_s": 21600,
+      "max_items_per_source": 50,
+      "budget_s": 30,
+      "discovery_query": "project OR portfolio OR case study",
+      "max_repo_age_months": 24,
+      "sources": [
+        {
+          "capability": "github.repos.list",
+          "prefer": [
+            "proxy_github-*",
+            "proxy_github*"
+          ],
+          "match": {
+            "operation_contains": [
+              "search_repositories",
+              "list_repos",
+              "list_user_repos",
+              "repos_list",
+              "user_repos"
+            ]
+          },
+          "args": {
+            "query": "user:{token_login} sort:updated",
+            "per_page": 100,
+            "limit": 100
+          },
+          "fallback_tool": "list_owned_repos"
+        },
+        {
+          "capability": "notion.pages.search",
+          "prefer": [
+            "proxy_Notion-*",
+            "proxy_notion-*",
+            "proxy_Notion*",
+            "proxy_notion*"
+          ],
+          "match": {
+            "operation_contains": [
+              "notion-search",
+              "notion_search",
+              "API-post-search"
+            ]
+          },
+          "args": {
+            "query": "{discovery_query}",
+            "page_size": 25,
+            "max_highlight_length": 400
+          },
+          "fallback_tool": null
+        }
+      ]
+    }
+  }
+}
