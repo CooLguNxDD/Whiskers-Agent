@@ -254,15 +254,15 @@ def test_admin_non_interactive_generates_password(monkeypatch, capsys):
 
 
 def test_admin_skips_when_account_exists(monkeypatch, capsys):
-    """run_admin() does not create credentials when vault already has an admin."""
+    """run_admin() prompts to reset (declining) rather than creating credentials when vault already has an admin."""
     setup = _setup()
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
     monkeypatch.setenv("MASTER_KEY", "x" * 44)
     monkeypatch.setattr(
         "getpass.getpass",
-        lambda *a, **k: pytest.fail("must not prompt when admin already exists"),
+        lambda *a, **k: pytest.fail("must not prompt for a password when declining reset"),
     )
-    monkeypatch.setattr("builtins.input", lambda *a, **k: pytest.fail("must not prompt"))
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "n")
 
     created = []
 
@@ -280,8 +280,6 @@ def test_admin_skips_when_account_exists(monkeypatch, capsys):
     args = setup.build_parser().parse_args(["admin"])
     assert setup.run_admin(args) == 0
     assert created == []
-    out = capsys.readouterr().out
-    assert "already exists" in out
 
 
 def test_admin_non_interactive_skips_without_password_when_exists(monkeypatch):
@@ -393,7 +391,7 @@ def test_mirror_plugin_active_upserts(monkeypatch):
 
 
 def test_run_db_forwards_dev_flag(monkeypatch):
-    """run_db() forwards the --dev flag to docker_compose_up for postgres overrides."""
+    """run_db() brings up only postgres+minio and forwards --dev to docker_compose_up."""
     setup = _setup()
     captured = {}
 
@@ -408,7 +406,7 @@ def test_run_db_forwards_dev_flag(monkeypatch):
 
     args = setup.build_parser().parse_args(["db", "--dev"])
     assert setup.run_db(args) == 0
-    assert captured["services"] == []
+    assert captured["services"] == ["postgres", "minio"]
     assert captured["dev"] is True
 
 
