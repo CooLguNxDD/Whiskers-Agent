@@ -212,6 +212,7 @@ legacy_plugins/**/credentials.json
 
 # react front-end package
 /frontend/cat-admin-frontend/node_modules
+/frontend/cat-admin-frontend/.pnpm-store
 /whiskers-design-temp
 
 # playwright
