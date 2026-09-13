@@ -107,6 +107,8 @@ jobs:
 
       - name: Read features config
         id: config
+        env:
+          VAR_REVIEW_BUDGET: ${{ vars.PULLFROG_REVIEW_BUDGET }}
         run: |
           set -euo pipefail
           node -e '
@@ -145,6 +147,12 @@ jobs:
             return result;
           }
           const config = parseYaml(fs.readFileSync(".github/pullfrog/config.yml", "utf8"));
+          // Repository variable -> config.features.pr_review.budget -> max.
+          // The minimal YAML reader preserves scalar quotes and inline comments.
+          const configBudget = String(config.features?.pr_review?.budget ?? "max")
+            .split("#", 1)[0].trim().replace(/^["\x27]|["\x27]$/g, "");
+          const reviewBudget = (process.env.VAR_REVIEW_BUDGET || configBudget).trim().toLowerCase();
+          console.log(`review_budget=${["low", "high", "max"].includes(reviewBudget) ? reviewBudget : "max"}`);
           console.log(`dispatch=${config.features?.dispatch ?? true}`);
           console.log(`mention_triggers=${config.features?.mention_triggers ?? true}`);
           console.log(`pr_review_enabled=${config.features?.pr_review?.enabled ?? true}`);
@@ -373,7 +381,14 @@ jobs:
         run: |
           node "$RUNNER_TEMP/pullfrog-runner/dist/cli.mjs" gha
         env:
-          INPUT_PROMPT: ${{ inputs.prompt }}
+          # Applies to automatic, mention-triggered, and manually dispatched reviews.
+          # Resolved from repo variable -> config.yml -> max; only known modes.
+          INPUT_PROMPT: |
+            For code review tasks, use this configured investigation budget:
+            review_budget: ${{ steps.config.outputs.review_budget }}
+            Follow `.github/pullfrog/instructions/review.md` for review tasks.
+
+            ${{ inputs.prompt }}
           INPUT_MODEL: ${{ steps.agent-opts.outputs.model }}
           INPUT_EFFORT: ${{ steps.agent-opts.outputs.effort }}
           INPUT_TIMEOUT: ${{ inputs.timeout || '1h' }}

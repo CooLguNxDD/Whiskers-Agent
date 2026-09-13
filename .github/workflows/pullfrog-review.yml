@@ -32,12 +32,12 @@ jobs:
       timeout: 60m
       # model/effort: repo vars PULLFROG_MODEL / PULLFROG_EFFORT (see pullfrog.yml)
       prompt: |
-        LOCAL Pullfrog PR review — OPTIMIZE FOR LOW TOKEN USE.
+        LOCAL Pullfrog PR review — investigate changed behavior and its downstream impact.
 
         1. Call select_mode → Review (or IncrementalReview only if this is clearly a delta re-review).
-        2. Read `.github/pullfrog/instructions/review.md` and obey its hard budget.
+        2. Read `.github/pullfrog/instructions/review.md` and apply the supplied review_budget (default: max).
         3. checkout_pr / get the PR diff for #${{ github.event.pull_request.number }} only.
-        4. Review ONLY changed files. Do not explore unrelated packages.
+        4. Follow the selected budget's scan depth, including affected unchanged dependencies and consumers.
         5. Submit a single GitHub PR review, then end the run.
         6. Do NOT write learnings, do NOT summarize the whole CI stack, do NOT open extra issues.
 

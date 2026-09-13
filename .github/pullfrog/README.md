@@ -35,7 +35,7 @@ Pullfrog listens to various GitHub repository events to run specific agents asyn
 
 | Feature / Workflow | Event Trigger | Execution Mode & Behavior | Concurrency Group |
 | :--- | :--- | :--- | :--- |
-| **PR Review**<br>[`pullfrog-review.yml`](../workflows/pullfrog-review.yml) | PR `opened`, `ready_for_review`, or `reopened`. | Runs a lightweight code review on the changed files only. Submits a single review, then terminates. | `pullfrog-review-<repo>-<pr#>` |
+| **PR Review**<br>[`pullfrog-review.yml`](../workflows/pullfrog-review.yml) | PR `opened`, `ready_for_review`, or `reopened`. | Uses low/high/max review budgets (default: max), tracing affected dependencies and consumers. Submits a single review, then terminates. | `pullfrog-review-<repo>-<pr#>` |
 | **Address Reviews**<br>[`pullfrog-address-reviews.yml`](../workflows/pullfrog-address-reviews.yml) | PR review `submitted` with `changes_requested`. | Triggers only if the reviewer is a **bot**. Pullfrog will implement the feedback, commit, and push updates. | `pullfrog-address-<repo>-<pr#>` |
 | **CI Failure Fix**<br>[`pullfrog-ci-fix.yml`](../workflows/pullfrog-ci-fix.yml) | A check suite finishes with a `failure` status. | Active only on bot-authored PR branches. Pullfrog inspects logs, diagnoses/resolves the issue, and pushes a fix commit containing `[pullfrog-ci-fix]`. | `pullfrog-ci-fix-<repo>-<pr#\|sha>` |
 | **Issue Triage**<br>[`pullfrog-issues.yml`](../workflows/pullfrog-issues.yml) | An issue is `opened`. | Pullfrog analyzes the request, writes an implementation plan as a comment, and applies up to 3 matching repository labels. | `pullfrog-issues-<repo>-<issue#>` |
@@ -56,6 +56,7 @@ features:
   mention_triggers: true     # Respond to @pullfrog mentions in comments
   pr_review:
     enabled: true            # Enable automatic PR reviews
+    budget: max              # low | high | max; PULLFROG_REVIEW_BUDGET overrides
     include_drafts: false    # Skip reviewing draft PRs
     on_synchronize: false    # Avoid expensive re-reviews on every commit push
   issues:
@@ -76,7 +77,37 @@ Under the [`instructions/`](instructions/) directory, three markdown instruction
 
 1.  **[`plan.md`](instructions/plan.md)**: Governs issue enrichment. Instructs the agent to post a structured approach (goal, files affected, risks, test plan).
 2.  **[`build.md`](instructions/build.md)**: Governs task execution and coding. Defines monorepo structures, package managers, and safety requirements.
-3.  **[`review.md`](instructions/review.md)**: Enforces a token budget limit. Restricts the agent to a maximum of 40 tool turns, 20 inline comments, and 400 words to optimize API costs.
+3.  **[`review.md`](instructions/review.md)**: Reusable code review template with low/high/max investigation budgets, evidence requirements, repository risk checks, and a coverage/validation summary. Max is the default.
+
+### Code Review Budgets
+
+Set `features.pr_review.budget` in [`config.yml`](config.yml) to `low`, `high`, or
+`max` (the shipped default). The repository Actions variable
+`PULLFROG_REVIEW_BUDGET` overrides this setting. Resolution order is **repository
+variable → config.yml → max**; an invalid selected value falls back to `max`.
+The shared workflow passes the result to automatic reviews, mention-triggered
+reviews, and manual review tasks. To control the budget from config.yml, leave
+the repository variable unset (remove it if it was previously configured).
+
+| Mode | Investigation calls after checkout | Depth | Inline cap / body target |
+| :--- | ---: | :--- | :--- |
+| `low` | 40 | Diff, risky functions, direct callers/callees, focused checks | 10 / 400 words |
+| `high` | 100 | Every changed file, affected consumers/providers, subsystem checks | 20 / 800 words |
+| `max` (default) | 200 | End-to-end impact, transitive dependencies, adversarial second pass, relevant regression/integration checks | 30 / 1,200 words |
+
+These are agent investigation ceilings, not enforced token/dollar caps. The
+workflow timeout still applies (automatic reviews: 60 minutes). Review budget
+does not change the model or `PULLFROG_EFFORT`. Incomplete coverage must be stated.
+See [the full template](instructions/review.md) for counting and output rules.
+
+Set the default explicitly with the [GitHub CLI](https://cli.github.com/manual/gh_variable_set):
+
+```sh
+gh variable set PULLFROG_REVIEW_BUDGET --body max --repo CooLguNxDD/Whiskers-Agent
+```
+
+The workflow reads this through GitHub's
+[`vars` context](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#vars-context).
 
 ---
 
@@ -99,6 +130,7 @@ You can set these in repository **Settings → Secrets and variables → Actions
 | **`PULLFROG_AGENT`** (Var) | `opencode` | Agent harness to execute (`opencode`, `claude`, `codex`, `cursor`, `antigravity`, `grok`). Default: `opencode`. |
 | **`PULLFROG_MODEL`** (Var) | `meta/muse-spark-contributor` | Model slug to run (`meta/muse-spark-contributor`, `meta/muse-spark-1.3`, `openrouter/meta/muse-spark-1.3`). |
 | **`PULLFROG_EFFORT`** (Var) | `medium` | Reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
+| **`PULLFROG_REVIEW_BUDGET`** (Var) | `max` | Overrides `features.pr_review.budget` (`low`, `high`, `max`). Unset uses config; invalid uses `max`. Independent of reasoning effort. |
 | **`META_MODEL_API_KEY`** (Secret) | `sk-...` | Direct API key for Meta Model API (Muse Spark). |
 | **`OPENROUTER_API_KEY`** (Secret) | `sk-or-...` | OpenRouter API key for Muse Spark and other models. |
 | **`OPENCODE_API_KEY`** (Secret) | `sk-...` | OpenCode Zen API key. |

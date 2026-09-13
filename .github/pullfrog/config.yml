@@ -20,6 +20,10 @@ features:
   mention_triggers: true
   pr_review:
     enabled: true
+    # Review setup: low (40 calls), high (100), max (200; default).
+    # PULLFROG_REVIEW_BUDGET overrides this for all code review entrypoints.
+    # Unset variable uses this value; invalid selected values fall back to max.
+    budget: max
     include_drafts: false
     on_synchronize: false
   issues:
