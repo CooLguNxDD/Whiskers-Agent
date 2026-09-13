@@ -102,8 +102,8 @@ def _prop_py_type(prop: dict) -> type:
 # URL helpers
 # ---------------------------------------------------------------------------
 
-# Matches both OpenAPI-style {param} and Express-style :param
-_PATH_PARAM_RE = re.compile(r"\{(\w+)\}|:(\w+)")
+# Matches both OpenAPI-style {param} and Express-style :param (must follow / or start of string)
+_PATH_PARAM_RE = re.compile(r"\{(\w+)\}|(?:^|/):(\w+)")
 
 
 def _extract_path_params(path_template: str) -> frozenset[str]:
@@ -119,7 +119,10 @@ def _substitute_path(path_template: str, kw: dict) -> str:
     for m in _PATH_PARAM_RE.finditer(path_template):
         param = m.group(1) or m.group(2)
         if param in kw:
-            url = url.replace(m.group(0), str(kw.pop(param)))
+            token = m.group(0)
+            val = str(kw.pop(param))
+            replacement = f"/{val}" if token.startswith("/:") else val
+            url = url.replace(token, replacement)
     return url
 
 

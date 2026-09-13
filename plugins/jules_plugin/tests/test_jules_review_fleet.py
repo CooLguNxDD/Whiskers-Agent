@@ -181,3 +181,23 @@ async def test_fire_review_fleet_posts_per_role():
     body = post.await_args.args[0]
     assert "prompt" in body and len(body["prompt"]) > 50
     assert isinstance(body.get("sourceContext"), dict)
+
+
+@pytest.mark.asyncio
+async def test_build_review_fleet_custom_roles():
+    """Custom domain roles like transport, modding, framework work seamlessly."""
+    out = await julesbuild_review_fleet(
+        roles="transport,modding,framework",
+        mode="diff",
+        base="main",
+        repo="CooLguNxDD/reframework-mcp-modding",
+        branch="feat",
+    )
+    assert out["status"] == "ok"
+    assert out["roles"] == ["transport", "modding", "framework"]
+    assert len(out["configs"]) == 3
+    assert out["configs"][0]["title"] == "[Review] Transport code health (diff vs main)"
+    assert "CODE_HEALTH_TRANSPORT.md" in out["configs"][0]["prompt"]
+    assert "CODE_HEALTH_MODDING.md" in out["configs"][1]["prompt"]
+    assert "CODE_HEALTH_FRAMEWORK.md" in out["configs"][2]["prompt"]
+
