@@ -15,16 +15,21 @@ on:
         type: string
         description: Run name
         required: false
+      agent:
+        type: string
+        description: "Agent harness override (opencode, claude, codex, cursor, antigravity, grok; default: opencode)"
+        required: false
+        default: "opencode"
       model:
         type: string
-        description: "Model slug override (else repo var PULLFROG_MODEL, else anthropic/claude-sonnet)"
+        description: "Model slug override (default: meta/muse-spark-contributor, or repo var PULLFROG_MODEL)"
         required: false
-        default: ""
+        default: "meta/muse-spark-contributor"
       effort:
         type: string
-        description: "Claude effort override: low|medium|high|max (else repo var PULLFROG_EFFORT, else medium)"
+        description: "Reasoning effort: minimal|low|medium|high|xhigh|max (default: medium)"
         required: false
-        default: ""
+        default: "medium"
       timeout:
         type: string
         description: Max run duration (e.g. 20m, 1h)
@@ -38,14 +43,19 @@ on:
       name:
         type: string
         required: false
+      agent:
+        type: string
+        description: "Optional agent override; empty uses vars.PULLFROG_AGENT or config.yml default"
+        required: false
+        default: ""
       model:
         type: string
-        description: "Optional override; empty uses vars.PULLFROG_MODEL"
+        description: "Optional model override; empty uses vars.PULLFROG_MODEL or config.yml default"
         required: false
         default: ""
       effort:
         type: string
-        description: "Optional override; empty uses vars.PULLFROG_EFFORT"
+        description: "Optional effort override; empty uses vars.PULLFROG_EFFORT or default"
         required: false
         default: ""
       timeout:
@@ -65,8 +75,6 @@ env:
 
 jobs:
   pullfrog:
-    # Disabled
-    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -147,9 +155,10 @@ jobs:
           console.log(`address_reviews_enabled=${config.features?.address_reviews?.enabled ?? true}`);
           console.log(`address_reviews_only_bot_prs=${config.features?.address_reviews?.only_bot_prs ?? true}`);
           console.log(`ci_fix_enabled=${config.features?.ci_fix?.enabled ?? true}`);
-          // Default TRUE — human PRs must not auto-get write-access agent runs
           console.log(`ci_fix_only_bot_prs=${config.features?.ci_fix?.only_bot_prs ?? true}`);
           console.log(`status_checks=${config.status_checks ?? false}`);
+          console.log(`default_agent=${config.agent ?? "opencode"}`);
+          console.log(`default_model=${config.model ?? "meta/muse-spark-contributor"}`);
           ' > "$RUNNER_TEMP/pullfrog-config.env"
 
           while IFS= read -r line || [ -n "$line" ]; do
@@ -300,58 +309,75 @@ jobs:
             echo "Working tree clean for agent git tools"
           fi
 
-      # Precedence: workflow input → repo Actions variable → built-in default
-      #   model:  inputs.model  | vars.PULLFROG_MODEL  | anthropic/claude-sonnet
+      # Precedence: workflow input → repo Actions variable → config.yml → default
+      #   agent:  inputs.agent  | vars.PULLFROG_AGENT  | config.agent | opencode
+      #   model:  inputs.model  | vars.PULLFROG_MODEL  | config.model | meta/muse-spark-contributor
       #   effort: inputs.effort | vars.PULLFROG_EFFORT | medium
-      - name: Resolve model and effort
+      - name: Resolve agent, model and effort
         id: agent-opts
         if: steps.check-feature.outputs.enabled == 'true'
         env:
+          INPUT_AGENT: ${{ inputs.agent }}
           INPUT_MODEL: ${{ inputs.model }}
           INPUT_EFFORT: ${{ inputs.effort }}
+          VAR_AGENT: ${{ vars.PULLFROG_AGENT }}
           VAR_MODEL: ${{ vars.PULLFROG_MODEL }}
           VAR_EFFORT: ${{ vars.PULLFROG_EFFORT }}
+          CONFIG_AGENT: ${{ steps.config.outputs.default_agent }}
+          CONFIG_MODEL: ${{ steps.config.outputs.default_model }}
         run: |
           set -euo pipefail
+          AGENT="${INPUT_AGENT:-}"
+          if [ -z "$AGENT" ]; then AGENT="${VAR_AGENT:-}"; fi
+          if [ -z "$AGENT" ]; then AGENT="${CONFIG_AGENT:-}"; fi
+          if [ -z "$AGENT" ]; then AGENT="opencode"; fi
+
           MODEL="${INPUT_MODEL:-}"
           if [ -z "$MODEL" ]; then MODEL="${VAR_MODEL:-}"; fi
-          if [ -z "$MODEL" ]; then MODEL="anthropic/claude-sonnet"; fi
+          if [ -z "$MODEL" ]; then MODEL="${CONFIG_MODEL:-}"; fi
+          if [ -z "$MODEL" ]; then MODEL="meta/muse-spark-contributor"; fi
 
           EFFORT="${INPUT_EFFORT:-}"
           if [ -z "$EFFORT" ]; then EFFORT="${VAR_EFFORT:-}"; fi
           if [ -z "$EFFORT" ]; then EFFORT="medium"; fi
           EFFORT="$(printf '%s' "$EFFORT" | tr '[:upper:]' '[:lower:]')"
           case "$EFFORT" in
-            low|medium|high|max) ;;
+            minimal|low|medium|high|xhigh|max) ;;
             *)
               echo "::warning::Invalid PULLFROG_EFFORT='$EFFORT' — using medium"
               EFFORT="medium"
               ;;
           esac
 
+          echo "agent=$AGENT" >> "$GITHUB_OUTPUT"
           echo "model=$MODEL" >> "$GITHUB_OUTPUT"
           echo "effort=$EFFORT" >> "$GITHUB_OUTPUT"
-          echo "Pullfrog agent opts: model=$MODEL effort=$EFFORT"
+          echo "Pullfrog agent opts: agent=$AGENT model=$MODEL effort=$EFFORT"
 
       - name: Run Pullfrog agent
-        uses: CooLguNxDD/pullfrog-lemon-custom-build@85447c7a308d8285769a000fcc3824a9b0c9dc59
+        uses: CooLguNxDD/pullfrog-lemon-custom-build@main
         if: steps.check-feature.outputs.enabled == 'true'
         with:
           prompt: ${{ inputs.prompt }}
           model: ${{ steps.agent-opts.outputs.model }}
+          effort: ${{ steps.agent-opts.outputs.effort }}
           timeout: ${{ inputs.timeout || '1h' }}
           token: ${{ steps.token.outputs.token }}
         env:
           # Prefer GitHub App installation token (same App as runners)
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          PULLFROG_AGENT: ${{ steps.agent-opts.outputs.agent }}
+          PULLFROG_MODEL: ${{ steps.agent-opts.outputs.model }}
           PULLFROG_AGENT_IMAGE: ${{ env.PULLFROG_AGENT_IMAGE }}
-          # Same as `with.effort` — works even on older action revisions that only read env
           PULLFROG_EFFORT: ${{ steps.agent-opts.outputs.effort }}
           # Lemon :p
           PULLFROG_LOCAL: "1"
           PULLFROG_BRAND: "Lemon Cat"
           PULLFROG_HOME_URL: "https://github.com/CooLguNxDD"
           PULLFROG_TRIGGER_WORKFLOW: "pullfrog.yml"
+          META_MODEL_API_KEY: ${{ secrets.META_MODEL_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -360,7 +386,6 @@ jobs:
           XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           MOONSHOT_API_KEY: ${{ secrets.MOONSHOT_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           ANTIGRAVITY_TOKEN: ${{ secrets.ANTIGRAVITY_TOKEN }}
           GROK_AUTH_JSON: ${{ secrets.GROK_AUTH_JSON }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}

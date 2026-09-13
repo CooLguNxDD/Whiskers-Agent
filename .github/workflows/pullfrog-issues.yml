@@ -11,8 +11,6 @@ concurrency:
 
 jobs:
   enrich:
-    # Disabled
-    if: false
     permissions:
       contents: write
       id-token: write

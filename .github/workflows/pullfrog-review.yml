@@ -16,8 +16,7 @@ concurrency:
 
 jobs:
   review:
-    # Disabled
-    if: false
+    if: github.event.pull_request.draft == false || github.event.action == 'ready_for_review'
     permissions:
       contents: write
       id-token: write

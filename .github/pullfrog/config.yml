@@ -2,7 +2,9 @@
 # Orchestration is entirely GitHub Actions + this config.
 
 mention: "@pullfrog"
-runner_labels: ubuntu
+runner_labels: ubuntu-latest
+agent: opencode
+model: meta/muse-spark-contributor
 
 # Official Pullfrog Agent Image
 image:
@@ -10,26 +12,27 @@ image:
   tag: latest
 
 action:
-  uses: CooLguNxDD/pullfrog-lemon-custom-build@85447c7a308d8285769a000fcc3824a9b0c9dc59
+  uses: CooLguNxDD/pullfrog-lemon-custom-build@main
 
 features:
-  dispatch: false
+  dispatch: true
   # Explicit @pullfrog in issue/PR comments only.
-  mention_triggers: false
+  mention_triggers: true
   pr_review:
-    enabled: false
+    enabled: true
     include_drafts: false
     on_synchronize: false
   issues:
-    enabled: false
+    enabled: true
     mode: plan # plan | build
 
   # Auto-address / CI-fix can push commits. Gate with only_bot_prs.
   address_reviews:
-    enabled: false
+    enabled: true
     only_bot_prs: true
   ci_fix:
-    enabled: false
+    enabled: true
     only_bot_prs: true
 
 status_checks: false
+
