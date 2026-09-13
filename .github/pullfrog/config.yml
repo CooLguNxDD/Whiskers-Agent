@@ -4,7 +4,7 @@
 mention: "@pullfrog"
 runner_labels: ubuntu-latest
 agent: opencode
-model: meta/muse-spark-contributor
+model: openrouter/meta/muse-spark-1.3-contributor
 
 # Official Pullfrog Agent Image
 image:
