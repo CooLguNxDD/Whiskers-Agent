@@ -2,14 +2,13 @@
 Jules plugin initialization.
 """
 import logging as _logging
-from plugins.jules_plugin.plugin_config import JulesPlugin
-
 _logger = _logging.getLogger("whiskers.plugins")
 
 def register(registry):
     """
     Registers the Jules plugin.
     """
+    from plugins.jules_plugin.plugin_config import JulesPlugin
     try:
         registry.lifecycle.register_plugin(JulesPlugin())
         _logger.info("Jules plugin registered successfully.")
