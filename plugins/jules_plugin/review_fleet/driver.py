@@ -126,7 +126,8 @@ def main(argv: list[str] | None = None) -> None:
         "--roles",
         default=None,
         help="optional comma-separated runners to spawn: "
-        f"{','.join(ALL_ROLES)}, or 'all' for the classic 2 frontend + 2 backend + 1 docs fleet. "
+        f"{','.join(ALL_ROLES)}, custom domain slugs, or 'all' for the classic "
+        "2 frontend + 2 backend + 1 docs fleet. "
         "Omit or pass empty to spawn nothing (no fixed fleet). "
         f"Example classic fleet: --roles {FLEET_ALL}",
     )
@@ -176,7 +177,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     try:
-        roles = parse_roles(args.roles)
+        roles = parse_roles(args.roles, allow_custom=True)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
 

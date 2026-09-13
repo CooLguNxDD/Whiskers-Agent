@@ -423,12 +423,17 @@ def _generate_json_tool_function(
     lines.append("    }.items() if v is not None}")
     lines.append("")
 
-    # path substitution
+    # path substitution — keep in sync with core.dynamic_tools.loader._substitute_path
     lines.append(f"    _path = {repr(path_template)}")
-    lines.append(f"    for _m in _PATH_PARAM_RE.finditer({repr(path_template)}):")
+    lines.append("    def _path_repl(_m):")
     lines.append("        _p = _m.group(1) or _m.group(2)")
-    lines.append("        if _p in _kw:")
-    lines.append("            _path = _path.replace(_m.group(0), str(_kw.pop(_p)))")
+    lines.append("        if _p not in _kw:")
+    lines.append("            return _m.group(0)")
+    lines.append("        _token = _m.group(0)")
+    lines.append("        _val = str(_kw.pop(_p))")
+    lines.append("        # Restore the leading slash consumed by (?:^|/) in the :param alternative.")
+    lines.append('        return f"/{_val}" if _token.startswith("/:") else _val')
+    lines.append("    _path = _PATH_PARAM_RE.sub(_path_repl, _path)")
     lines.append("")
 
     # unresolved path-param guard
@@ -547,7 +552,7 @@ def _build_json_module_header(module_doc: str, legacy: bool = False) -> str:
         )
 
     # Regex pattern: \\{ → \{ in the written file (inside a raw string r"...")
-    regex_line = '_PATH_PARAM_RE = re.compile(r"\\{(\\w+)\\}|:(\\w+)")'
+    regex_line = '_PATH_PARAM_RE = re.compile(r"\\{(\\w+)\\}|(?:^|/):(\\w+)")'
 
     return (
         f'"""{module_doc}"""\n'
