@@ -354,16 +354,26 @@ jobs:
           echo "effort=$EFFORT" >> "$GITHUB_OUTPUT"
           echo "Pullfrog agent opts: agent=$AGENT model=$MODEL effort=$EFFORT"
 
-      - name: Run Pullfrog agent
-        uses: CooLguNxDD/pullfrog-lemon-custom-build@main
+      - name: Clone Pullfrog Action
+        id: clone-pullfrog
         if: steps.check-feature.outputs.enabled == 'true'
-        with:
-          prompt: ${{ inputs.prompt }}
-          model: ${{ steps.agent-opts.outputs.model }}
-          effort: ${{ steps.agent-opts.outputs.effort }}
-          timeout: ${{ inputs.timeout || '1h' }}
-          token: ${{ steps.token.outputs.token }}
         env:
+          ACTION_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/pullfrog-runner"
+          git clone --depth 1 "https://x-access-token:${ACTION_TOKEN}@github.com/CooLguNxDD/pullfrog-lemon-custom-build.git" "$RUNNER_TEMP/pullfrog-runner"
+
+      - name: Run Pullfrog agent
+        if: steps.check-feature.outputs.enabled == 'true'
+        run: |
+          node "$RUNNER_TEMP/pullfrog-runner/dist/cli.mjs" gha
+        env:
+          INPUT_PROMPT: ${{ inputs.prompt }}
+          INPUT_MODEL: ${{ steps.agent-opts.outputs.model }}
+          INPUT_EFFORT: ${{ steps.agent-opts.outputs.effort }}
+          INPUT_TIMEOUT: ${{ inputs.timeout || '1h' }}
+          INPUT_TOKEN: ${{ steps.token.outputs.token }}
           # Prefer GitHub App installation token (same App as runners)
           GH_TOKEN: ${{ steps.token.outputs.token }}
           PULLFROG_AGENT: ${{ steps.agent-opts.outputs.agent }}
@@ -389,3 +399,10 @@ jobs:
           ANTIGRAVITY_TOKEN: ${{ secrets.ANTIGRAVITY_TOKEN }}
           GROK_AUTH_JSON: ${{ secrets.GROK_AUTH_JSON }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+
+      - name: Pullfrog agent post-step
+        if: always() && steps.check-feature.outputs.enabled == 'true'
+        run: |
+          if [ -d "$RUNNER_TEMP/pullfrog-runner" ] && [ -f "$RUNNER_TEMP/pullfrog-runner/dist/cli.mjs" ]; then
+            node "$RUNNER_TEMP/pullfrog-runner/dist/cli.mjs" gha --post || true
+          fi
