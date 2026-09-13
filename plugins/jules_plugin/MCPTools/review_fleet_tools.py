@@ -33,7 +33,7 @@ def _normalize_roles(roles: str | list[str] | None) -> list[str]:
         raw = str(roles).strip()
     if not raw:
         return []
-    return parse_roles(raw)
+    return parse_roles(raw, allow_custom=True)
 
 
 def _resolve_git_defaults(
