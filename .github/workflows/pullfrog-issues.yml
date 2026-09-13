@@ -11,6 +11,13 @@ concurrency:
 
 jobs:
   enrich:
+    # Trusted @pullfrog mentions on new issues are handled by pullfrog-triggers.yml;
+    # skip enrichment then so two agents don't run on the same issue.
+    if: |
+      !(
+        contains(github.event.issue.body, '@pullfrog') &&
+        contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.issue.author_association)
+      )
     permissions:
       contents: write
       id-token: write

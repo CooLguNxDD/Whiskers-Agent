@@ -23,8 +23,8 @@ You can trigger a Pullfrog run manually through the GitHub Actions tab by select
 The manual dispatch accepts the following input parameters:
 *   **`prompt`** (Required): The instruction or task payload for the agent.
 *   **`name`** (Optional): A custom run name to identify this execution in GitHub Actions logs.
-*   **`model`** (Optional): Model slug override (e.g. `anthropic/claude-3-5-sonnet`, `google/gemini-2.5-pro`). If left blank, it uses the repository variable `PULLFROG_MODEL`, falling back to `anthropic/claude-sonnet`.
-*   **`effort`** (Optional): Claude reasoning/thinking budget override (`low` | `medium` | `high` | `max`). Defaults to `medium` or the repository variable `PULLFROG_EFFORT`.
+*   **`model`** (Optional): Model slug override (e.g. `anthropic/claude-3-5-sonnet`, `google/gemini-2.5-pro`). If left blank, it uses the repository variable `PULLFROG_MODEL`, falling back to `model` in `config.yml` (`openrouter/meta/muse-spark-1.3-contributor`).
+*   **`effort`** (Optional): Claude reasoning/thinking budget override (`low` | `medium` | `high` | `max`). If left blank, it uses the repository variable `PULLFROG_EFFORT`, falling back to `medium`.
 *   **`timeout`** (Optional): Maximum run duration (e.g., `20m`, `1h`). Default: `1h`.
 
 ---
@@ -49,7 +49,9 @@ You can configure global rules and feature flags in `.github/pullfrog/config.yml
 
 ```yaml
 mention: "@pullfrog"
-runner_labels: ubuntu
+
+action:
+  uses: CooLguNxDD/pullfrog-lemon-custom-build@<40-char SHA>  # pinned runner revision
 
 features:
   dispatch: true             # Allow manual dispatch

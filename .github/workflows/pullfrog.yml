@@ -17,19 +17,19 @@ on:
         required: false
       agent:
         type: string
-        description: "Agent harness override (opencode, claude, codex, cursor, antigravity, grok; default: opencode)"
+        description: "Agent harness override (opencode, claude, codex, cursor, antigravity, grok); empty uses repo var PULLFROG_AGENT, then config.yml agent"
         required: false
-        default: "opencode"
+        default: ""
       model:
         type: string
-        description: "Model slug override (default: opencode/muse-spark-1.3-contributor-free, or repo var PULLFROG_MODEL)"
+        description: "Model slug override; empty uses repo var PULLFROG_MODEL, then config.yml model"
         required: false
-        default: "opencode/muse-spark-1.3-contributor-free"
+        default: ""
       effort:
         type: string
-        description: "Reasoning effort: minimal|low|medium|high|xhigh|max (default: medium)"
+        description: "Reasoning effort: minimal|low|medium|high|xhigh|max; empty uses repo var PULLFROG_EFFORT, then medium"
         required: false
-        default: "medium"
+        default: ""
       timeout:
         type: string
         description: Max run duration (e.g. 20m, 1h)
@@ -167,6 +167,8 @@ jobs:
           console.log(`status_checks=${config.status_checks ?? false}`);
           console.log(`default_agent=${config.agent ?? "opencode"}`);
           console.log(`default_model=${config.model ?? "openrouter/meta/muse-spark-1.3-contributor"}`);
+          // Runner revision: config.action.uses "owner/repo@<40-hex sha>" (validated at clone).
+          console.log(`runner_ref=${String(config.action?.uses ?? "").split("@")[1] ?? ""}`);
           ' > "$RUNNER_TEMP/pullfrog-config.env"
 
           while IFS= read -r line || [ -n "$line" ]; do
@@ -181,7 +183,10 @@ jobs:
           set -euo pipefail
           FEATURE="${{ inputs.feature }}"
           if [ -z "$FEATURE" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            # Empty feature = manual workflow_dispatch (all callers pass a feature).
+            ENABLED="${{ steps.config.outputs.dispatch }}"
+            echo "Manual dispatch enabled status: $ENABLED"
+            echo "enabled=$ENABLED" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -370,11 +375,25 @@ jobs:
         env:
           ACTION_TOKEN: ${{ steps.token.outputs.token }}
           PAT: ${{ secrets.PULLFROG_GITHUB_TOKEN }}
+          RUNNER_REF: ${{ steps.config.outputs.runner_ref }}
         run: |
           set -euo pipefail
-          rm -rf "$RUNNER_TEMP/pullfrog-runner"
-          CLONE_TOKEN="${PAT:-$ACTION_TOKEN}"
-          git clone --depth 1 "https://x-access-token:${CLONE_TOKEN}@github.com/CooLguNxDD/pullfrog-lemon-custom-build.git" "$RUNNER_TEMP/pullfrog-runner"
+          # Pinned to the immutable SHA in config.yml action.uses; bump deliberately.
+          if ! [[ "$RUNNER_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::config.yml action.uses must pin a full 40-char commit SHA (got '${RUNNER_REF}')"
+            exit 1
+          fi
+          # Prefer the short-lived App installation token; PAT is fallback only.
+          CLONE_TOKEN="${ACTION_TOKEN:-$PAT}"
+          RUNNER_DIR="$RUNNER_TEMP/pullfrog-runner"
+          rm -rf "$RUNNER_DIR"
+          git init -q "$RUNNER_DIR"
+          git -C "$RUNNER_DIR" fetch -q --depth 1 "https://x-access-token:${CLONE_TOKEN}@github.com/CooLguNxDD/pullfrog-lemon-custom-build.git" "$RUNNER_REF"
+          git -C "$RUNNER_DIR" checkout -q --detach FETCH_HEAD
+          if [ "$(git -C "$RUNNER_DIR" rev-parse HEAD)" != "$RUNNER_REF" ]; then
+            echo "::error::Pullfrog runner checkout does not match pinned SHA $RUNNER_REF"
+            exit 1
+          fi
 
       - name: Run Pullfrog agent
         if: steps.check-feature.outputs.enabled == 'true'
