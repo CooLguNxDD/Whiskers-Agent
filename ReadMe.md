@@ -435,7 +435,8 @@ docker compose build --no-cache
 ./install.sh --yes                         # first-time (Windows: .\install.ps1 -Yes)
 python terminal/script/setup.py doctor     # preflight
 python scripts/dev.py                      # Docker + Postgres + MCP
-python scripts/run_tests.py                # pytest in the whiskers-agent-server container```
+python scripts/run_tests.py                # pytest in the whiskers-agent-server container
+```
 
 Generate new plugin tools from YAML (output path is per-plugin, not a root `MCPTools/` folder):
 
