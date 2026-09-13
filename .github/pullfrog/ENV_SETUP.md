@@ -11,7 +11,7 @@ Run these commands from your local terminal with the GitHub CLI authenticated:
 ```bash
 # 1. Repository Variables (Configuration)
 gh variable set PULLFROG_AGENT --body "opencode"
-gh variable set PULLFROG_MODEL --body "meta/muse-spark-contributor"
+gh variable set PULLFROG_MODEL --body "openrouter/meta/muse-spark-1.3-contributor"
 gh variable set PULLFROG_EFFORT --body "medium"
 
 # 2. Authentication Secret (Choose Option A or Option B)
@@ -22,15 +22,8 @@ gh secret set PULLFROG_GITHUB_TOKEN
 gh secret set PULLFROG_APP_ID
 gh secret set PULLFROG_APP_PRIVATE_KEY < path/to/private-key.pem
 
-# 3. Model API Key for Muse Spark (Set at least one route):
-# Direct route (Meta Model API):
-gh secret set META_MODEL_API_KEY
-
-# OR OpenRouter route (supports meta/muse-spark-1.3 and contributor/free tiers):
+# 3. Model API Key for OpenRouter (Muse Spark 1.3 Free/Contributor):
 gh secret set OPENROUTER_API_KEY
-
-# OR OpenCode Zen route:
-gh secret set OPENCODE_API_KEY
 ```
 
 ---
@@ -45,7 +38,7 @@ Click **New repository variable**:
 | Variable Name | Value | Description |
 | :--- | :--- | :--- |
 | `PULLFROG_AGENT` | `opencode` | Forces the OpenCode agent harness. |
-| `PULLFROG_MODEL` | `meta/muse-spark-contributor` | Default model (Muse Spark 1.3 Contributor / Free tier). |
+| `PULLFROG_MODEL` | `openrouter/meta/muse-spark-1.3-contributor` | Default model (Muse Spark 1.3 Contributor / Free tier via OpenRouter). |
 | `PULLFROG_EFFORT` | `medium` | Reasoning effort level (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
 
 ### 2. Secrets Tab (`Repository secrets`)
@@ -53,9 +46,9 @@ Click **New repository secret**:
 
 | Secret Name | Description |
 | :--- | :--- |
+| `OPENROUTER_API_KEY` | **Required**: OpenRouter API key for Muse Spark 1.3. |
 | `PULLFROG_GITHUB_TOKEN` | GitHub PAT with `contents: write`, `pull-requests: write`, `issues: write`. |
-| `META_MODEL_API_KEY` | Direct API key for Meta Model API (for `meta/muse-spark-1.3` / `meta/muse-spark-contributor`). |
-| `OPENROUTER_API_KEY` | *(Alternative)* OpenRouter API key if routing Muse Spark via OpenRouter. |
+| `META_MODEL_API_KEY` | *(Alternative)* Direct Meta Model API key if switching to direct Meta route. |
 | `OPENCODE_API_KEY` | *(Alternative)* OpenCode Zen API key if routing via OpenCode Zen. |
 | `PULLFROG_APP_ID` | *(Optional)* GitHub App ID if authenticating via GitHub App. |
 | `PULLFROG_APP_PRIVATE_KEY` | *(Optional)* GitHub App private RSA key PEM. |
