@@ -428,7 +428,10 @@ def _generate_json_tool_function(
     lines.append(f"    for _m in _PATH_PARAM_RE.finditer({repr(path_template)}):")
     lines.append("        _p = _m.group(1) or _m.group(2)")
     lines.append("        if _p in _kw:")
-    lines.append("            _path = _path.replace(_m.group(0), str(_kw.pop(_p)))")
+    lines.append('            _token = _m.group(0)')
+    lines.append('            _val = str(_kw.pop(_p))')
+    lines.append('            _rep = f"/{_val}" if _token.startswith("/:") else _val')
+    lines.append('            _path = _path.replace(_token, _rep)')
     lines.append("")
 
     # unresolved path-param guard
@@ -547,7 +550,7 @@ def _build_json_module_header(module_doc: str, legacy: bool = False) -> str:
         )
 
     # Regex pattern: \\{ → \{ in the written file (inside a raw string r"...")
-    regex_line = '_PATH_PARAM_RE = re.compile(r"\\{(\\w+)\\}|:(\\w+)")'
+    regex_line = '_PATH_PARAM_RE = re.compile(r"\\{(\\w+)\\}|(?:^|/):(\\w+)")'
 
     return (
         f'"""{module_doc}"""\n'
