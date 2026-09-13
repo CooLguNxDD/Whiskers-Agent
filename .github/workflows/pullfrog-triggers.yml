@@ -28,9 +28,13 @@ concurrency:
 
 jobs:
   mention:
+    # Trusted actors only: any external user could otherwise mention @pullfrog
+    # and trigger a privileged run (write permissions + secrets).
     if: |
-      (github.event.comment && contains(github.event.comment.body, '@pullfrog')) ||
-      (github.event.issue && !github.event.comment && contains(github.event.issue.body, '@pullfrog'))
+      (
+        (github.event.comment && contains(github.event.comment.body, '@pullfrog')) ||
+        (github.event.issue && !github.event.comment && contains(github.event.issue.body, '@pullfrog'))
+      ) && contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association || github.event.issue.author_association)
     permissions:
       contents: write
       id-token: write
