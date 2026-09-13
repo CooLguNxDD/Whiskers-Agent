@@ -2,8 +2,6 @@
 Jules plugin initialization.
 """
 import logging as _logging
-from plugins.jules_plugin.plugin_config import JulesPlugin
-
 _logger = _logging.getLogger("whiskers.plugins")
 
 def register(registry):
@@ -11,6 +9,8 @@ def register(registry):
     Registers the Jules plugin.
     """
     try:
+        # Deferred so the standalone CLI can import templates without FastMCP.
+        from plugins.jules_plugin.plugin_config import JulesPlugin
         registry.lifecycle.register_plugin(JulesPlugin())
         _logger.info("Jules plugin registered successfully.")
     except Exception as e:

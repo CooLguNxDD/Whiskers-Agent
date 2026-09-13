@@ -6,6 +6,7 @@ docs. Do not fork these strings into agent skill drivers — import from here.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 ALL_ROLES: tuple[str, ...] = (
@@ -64,12 +65,15 @@ def mode_text(mode: str, base_branch: str | None, scope_desc: str) -> dict[str, 
                 f"Compute `git merge-base {base} HEAD` first. If that fails "
                 "(shallow clone / no merge-base): run `git fetch --unshallow origin` "
                 "(or `git fetch --deepen=200 origin` if unshallow is refused), then retry. "
-                "If merge-base still cannot be computed, STOP: write the report with a single "
-                "finding that the merge-base is unavailable, and do not invent a file list or "
-                f"review `{base}..HEAD`. When merge-base succeeds, list files with "
-                f"`git diff --name-only {base}...HEAD` (three-dot) and the corresponding patch "
-                "hunks. Restrict analysis and findings to those deltas and their immediate "
-                "call-site context. Do not deep-scan unrelated modules."
+                "If merge-base still cannot be computed (e.g. shallow clone on a private repo "
+                "without interactive credentials): STOP: do not fall back to two-dot "
+                f"`{base}..HEAD` (which inverts `{base}`-only work into phantom deletions). "
+                "Instead, record a shallow-clone notice at the top of the report file, inspect branch "
+                "commits via `git log --oneline` (or `git show --stat`), and perform the code health "
+                f"review directly on the files in {scope_desc}. "
+                f"When merge-base succeeds, list files with `git diff --name-only {base}...HEAD` "
+                "(three-dot) and the corresponding patch hunks. Restrict analysis and findings "
+                "to those deltas and their immediate call-site context. Do not deep-scan unrelated modules."
             ),
         }
     return {
@@ -138,7 +142,7 @@ def build_roles(frontend_path: str, backend_path: str, docs_path: str) -> dict[s
     }
 
 
-def parse_roles(raw: str | None) -> list[str]:
+def parse_roles(raw: str | None, allow_custom: bool = False) -> list[str]:
     """Parse --roles. Empty/omitted → no runners. 'all' → classic 2+2+1 fleet."""
     if raw is None:
         return []
@@ -148,9 +152,10 @@ def parse_roles(raw: str | None) -> list[str]:
     if raw.lower() == "all":
         return list(ALL_ROLES)
     roles = [r.strip() for r in raw.split(",") if r.strip()]
-    unknown = [r for r in roles if r not in ALL_ROLES]
-    if unknown:
-        raise ValueError(f"unknown role(s): {unknown}; valid: {list(ALL_ROLES)} or 'all'")
+    if not allow_custom:
+        unknown = [r for r in roles if r not in ALL_ROLES]
+        if unknown:
+            raise ValueError(f"unknown role(s): {unknown}; valid: {list(ALL_ROLES)} or 'all'")
     seen: set[str] = set()
     out: list[str] = []
     for r in roles:
@@ -158,6 +163,13 @@ def parse_roles(raw: str | None) -> list[str]:
             seen.add(r)
             out.append(r)
     return out
+
+
+def _custom_report_name(slug: str) -> str:
+    """Sanitize a custom domain slug into a CODE_HEALTH_*.md report filename."""
+    # Hyphens and other punctuation become underscores in one pass.
+    safe_slug = re.sub(r"[^a-zA-Z0-9_]", "_", slug).upper()
+    return f"CODE_HEALTH_{safe_slug}.md"
 
 
 def build_configs(
@@ -177,9 +189,33 @@ def build_configs(
     configs: list[dict[str, Any]] = []
     mode_suffix = "diff" if mode == "diff" else "full"
     base_for_title = base_branch or "main"
+    used_reports: dict[str, str] = {}
 
     for key in roles:
-        r = role_defs[key]
+        if key in role_defs:
+            r = role_defs[key]
+        else:
+            slug = key.strip()
+            if not slug:
+                continue
+            report_name = _custom_report_name(slug)
+            title = f"[Review] {slug.replace('-', ' ').replace('_', ' ').title()} code health"
+            scope_path = backend_path if backend_path and backend_path != "." else (docs_path if docs_path and docs_path != "." else frontend_path)
+            scope_desc = f"`{scope_path}` ({slug} domain)"
+            r = dict(
+                title=title,
+                scope_desc=scope_desc,
+                extra_criteria=f"- Domain Focus: deep analysis of {slug} architecture, reliability, interfaces, and defensive error handling.\n",
+                report_name=report_name,
+                template=BASE_TEMPLATE,
+            )
+        report_name = r["report_name"]
+        prior = used_reports.get(report_name)
+        if prior is not None:
+            raise ValueError(
+                f"role {key!r} collides with {prior!r} on report {report_name}"
+            )
+        used_reports[report_name] = key
         fragments = mode_text(mode, base_branch, r["scope_desc"])
         prompt = r["template"].format(
             scope_desc=r["scope_desc"],

@@ -23,8 +23,10 @@ MCP tools). Roles are **optional** — never auto-spawn 2+2+1.
 | `backend-b` | one session |
 | `frontend-a,docs` | exactly those |
 | `all` | classic five: frontend-a/b, backend-a/b, docs |
+| `transport,modding,framework` | custom domain sessions |
 
-Valid: `frontend-a`, `frontend-b`, `backend-a`, `backend-b`, `docs`.
+Valid: `frontend-a`, `frontend-b`, `backend-a`, `backend-b`, `docs`, or custom domain slugs.
+Distinct roles that sanitize to the same `CODE_HEALTH_*.md` report name raise.
 
 ## Prefer server fleet tools
 
@@ -54,11 +56,12 @@ keys only.
 | **diff** | branch/PR vs `base` (`{base}...HEAD` three-dot only) |
 | **full** | whole-tree deep scan |
 
-**Diff merge-base is fail-closed.** A Jules session that cannot compute
-`git merge-base {base} HEAD` must unshallow (`git fetch --unshallow origin` or
-`--deepen`) and retry. If merge-base is still missing, it **aborts the review**
-with that reason in the report. Never fall back to two-dot `{base}..HEAD`
-(that inverts `{base}`-only work into phantom deletions on a shallow clone).
+**Diff merge-base resilience:** A Jules session attempts `git merge-base {base} HEAD`
+first and unshallows if possible. If merge-base cannot be computed (e.g. shallow clone
+on a private repo where git fetch has no terminal credentials), it does **not** abort:
+it notes the shallow history warning in the report and reviews the scoped files
+directly on the branch. It never falls back to two-dot `{base}..HEAD` (which inverts
+`{base}`-only work into phantom deletions).
 
 Pass `repo`, `branch` on the server (git autodetect may be unavailable in Docker).
 `sourceContext` for raw create is a JSON **string**.
@@ -72,6 +75,7 @@ Pass `repo`, `branch` on the server (git autodetect may be unavailable in Docker
 | backend-a | services | `CODE_HEALTH_BACKEND_A.md` |
 | backend-b | security/tenant/SSRF/DAL | `CODE_HEALTH_BACKEND_B.md` |
 | docs | missing docs | `DOC_GAPS_REPORT.md` |
+| custom slug | domain focus | `CODE_HEALTH_<SLUG>.md` (unique after sanitization) |
 
 Templates (BASE/DOC + mode fragments) live in
 `plugins/jules_plugin/review_fleet/templates.py` — fleet tools expand them.
