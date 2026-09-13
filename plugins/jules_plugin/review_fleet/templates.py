@@ -165,6 +165,13 @@ def parse_roles(raw: str | None, allow_custom: bool = False) -> list[str]:
     return out
 
 
+def _custom_report_name(slug: str) -> str:
+    """Sanitize a custom domain slug into a CODE_HEALTH_*.md report filename."""
+    # Hyphens and other punctuation become underscores in one pass.
+    safe_slug = re.sub(r"[^a-zA-Z0-9_]", "_", slug).upper()
+    return f"CODE_HEALTH_{safe_slug}.md"
+
+
 def build_configs(
     roles: list[str],
     repo: str,
@@ -182,14 +189,16 @@ def build_configs(
     configs: list[dict[str, Any]] = []
     mode_suffix = "diff" if mode == "diff" else "full"
     base_for_title = base_branch or "main"
+    used_reports: dict[str, str] = {}
 
     for key in roles:
         if key in role_defs:
             r = role_defs[key]
         else:
             slug = key.strip()
-            safe_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", slug)
-            report_name = f"CODE_HEALTH_{safe_slug.upper().replace('-', '_')}.md"
+            if not slug:
+                continue
+            report_name = _custom_report_name(slug)
             title = f"[Review] {slug.replace('-', ' ').replace('_', ' ').title()} code health"
             scope_path = backend_path if backend_path and backend_path != "." else (docs_path if docs_path and docs_path != "." else frontend_path)
             scope_desc = f"`{scope_path}` ({slug} domain)"
@@ -200,6 +209,13 @@ def build_configs(
                 report_name=report_name,
                 template=BASE_TEMPLATE,
             )
+        report_name = r["report_name"]
+        prior = used_reports.get(report_name)
+        if prior is not None:
+            raise ValueError(
+                f"role {key!r} collides with {prior!r} on report {report_name}"
+            )
+        used_reports[report_name] = key
         fragments = mode_text(mode, base_branch, r["scope_desc"])
         prompt = r["template"].format(
             scope_desc=r["scope_desc"],

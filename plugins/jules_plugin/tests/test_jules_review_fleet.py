@@ -12,7 +12,7 @@ from plugins.jules_plugin.review_fleet import (
     parse_roles,
     plugin_skill_path,
 )
-from plugins.jules_plugin.review_fleet.templates import build_roles
+from plugins.jules_plugin.review_fleet.templates import _custom_report_name, build_roles
 from plugins.jules_plugin.MCPTools.review_fleet_tools import (
     julesbuild_review_fleet,
     julesfire_review_fleet,
@@ -200,4 +200,52 @@ async def test_build_review_fleet_custom_roles():
     assert "CODE_HEALTH_TRANSPORT.md" in out["configs"][0]["prompt"]
     assert "CODE_HEALTH_MODDING.md" in out["configs"][1]["prompt"]
     assert "CODE_HEALTH_FRAMEWORK.md" in out["configs"][2]["prompt"]
+
+
+def _fleet_kwargs(**overrides):
+    base = dict(
+        repo="owner/repo",
+        branch="feat",
+        require_plan_approval=False,
+        automation_mode="AUTOMATION_MODE_UNSPECIFIED",
+        frontend_path=".",
+        backend_path=".",
+        docs_path=".",
+        mode="full",
+        base_branch=None,
+    )
+    base.update(overrides)
+    return base
+
+
+def test_custom_report_name_hyphen_one_pass():
+    assert _custom_report_name("my-domain") == "CODE_HEALTH_MY_DOMAIN.md"
+
+
+def test_build_configs_builtin_custom_report_collision_raises():
+    with pytest.raises(ValueError, match="CODE_HEALTH_FRONTEND_A"):
+        build_configs(roles=["frontend-a", "Frontend-A"], **_fleet_kwargs())
+
+
+def test_build_configs_sanitized_custom_collision_raises():
+    with pytest.raises(ValueError, match=r"collides with"):
+        build_configs(roles=["a/b", "a?b"], **_fleet_kwargs())
+
+
+def test_build_configs_hyphen_custom_role_report():
+    configs = build_configs(roles=["my-domain"], **_fleet_kwargs())
+    assert len(configs) == 1
+    assert "CODE_HEALTH_MY_DOMAIN.md" in configs[0]["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_build_review_fleet_report_collision_returns_error():
+    out = await julesbuild_review_fleet(
+        roles="frontend-a,Frontend-A",
+        mode="full",
+        repo="owner/repo",
+        branch="main",
+    )
+    assert out["status"] == "error"
+    assert "CODE_HEALTH_FRONTEND_A" in out["error"]
 
