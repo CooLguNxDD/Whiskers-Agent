@@ -268,6 +268,8 @@ jobs:
         with:
           app-id: ${{ secrets.PULLFROG_APP_ID }}
           private-key: ${{ secrets.PULLFROG_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: "pullfrog-lemon-custom-build,${{ github.event.repository.name }}"
 
       - name: Resolve agent GH_TOKEN
         id: token
@@ -359,10 +361,12 @@ jobs:
         if: steps.check-feature.outputs.enabled == 'true'
         env:
           ACTION_TOKEN: ${{ steps.token.outputs.token }}
+          PAT: ${{ secrets.PULLFROG_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           rm -rf "$RUNNER_TEMP/pullfrog-runner"
-          git clone --depth 1 "https://x-access-token:${ACTION_TOKEN}@github.com/CooLguNxDD/pullfrog-lemon-custom-build.git" "$RUNNER_TEMP/pullfrog-runner"
+          CLONE_TOKEN="${PAT:-$ACTION_TOKEN}"
+          git clone --depth 1 "https://x-access-token:${CLONE_TOKEN}@github.com/CooLguNxDD/pullfrog-lemon-custom-build.git" "$RUNNER_TEMP/pullfrog-runner"
 
       - name: Run Pullfrog agent
         if: steps.check-feature.outputs.enabled == 'true'
