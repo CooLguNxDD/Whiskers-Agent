@@ -115,15 +115,15 @@ def _extract_path_params(path_template: str) -> frozenset[str]:
 
 def _substitute_path(path_template: str, kw: dict) -> str:
     """Replace ``{param}`` or ``:param`` tokens in *path_template* using *kw*, mutating *kw*."""
-    url = path_template
-    for m in _PATH_PARAM_RE.finditer(path_template):
+    def replacer(m: re.Match) -> str:
         param = m.group(1) or m.group(2)
-        if param in kw:
-            token = m.group(0)
-            val = str(kw.pop(param))
-            replacement = f"/{val}" if token.startswith("/:") else val
-            url = url.replace(token, replacement)
-    return url
+        if param not in kw:
+            return m.group(0)
+        token = m.group(0)
+        val = str(kw.pop(param))
+        # Restore the leading slash consumed by (?:^|/) in the :param alternative.
+        return f"/{val}" if token.startswith("/:") else val
+    return _PATH_PARAM_RE.sub(replacer, path_template)
 
 
 # ---------------------------------------------------------------------------
