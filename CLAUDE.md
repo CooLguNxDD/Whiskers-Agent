@@ -597,7 +597,6 @@ encrypted under `MASTER_KEY` via pgcrypto.
 | `agy-tdd-pipeline` / `notion-writeup` | TDD orchestration, Notion publishing |
 | `career-ops-pipeline` | One-call `career_ops_apply_v1` flow pairing job_search_plugin + portfolio_plugin for a CLI agent driving Career-Ops |
 | `theme-registry` | Shared JSON theme vocabulary (`utils.theme_registry`, `isLight`, water tokens, CatPortfolio `gen:themes`) |
-| `jules-review-fleet` | Optional Jules review roles via `julesfire_review_fleet`; custom domain slugs allowed; colliding sanitized report names raise; **diff mode: shallow-clone notice + scoped files when merge-base is missing** (never two-dot `{base}..HEAD`) |
 
 Plugin-local skills live under `plugins/<pkg>/skills/` and are injected into planner prompts
 (e.g. portfolio `layout-design-builder.md`, `context-discovery.md`, `agentic-layout-composition.md`;
