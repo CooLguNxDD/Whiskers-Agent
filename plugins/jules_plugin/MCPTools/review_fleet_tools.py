@@ -202,18 +202,21 @@ async def julesbuild_review_fleet(
     be = (backend_path or default_path).strip() or default_path
     docs = (docs_path or default_path).strip() or default_path
 
-    configs = build_configs(
-        role_list,
-        repo_v,
-        branch_v,
-        require_plan_approval,
-        automation_mode or "AUTOMATION_MODE_UNSPECIFIED",
-        fe,
-        be,
-        docs,
-        mode=mode_n,
-        base_branch=base_v if mode_n == "diff" else None,
-    )
+    try:
+        configs = build_configs(
+            role_list,
+            repo_v,
+            branch_v,
+            require_plan_approval,
+            automation_mode or "AUTOMATION_MODE_UNSPECIFIED",
+            fe,
+            be,
+            docs,
+            mode=mode_n,
+            base_branch=base_v if mode_n == "diff" else None,
+        )
+    except ValueError as exc:
+        return {"status": "error", "error": str(exc)}
     return {
         "status": "ok",
         "roles": role_list,

@@ -8,8 +8,9 @@ def register(registry):
     """
     Registers the Jules plugin.
     """
-    from plugins.jules_plugin.plugin_config import JulesPlugin
     try:
+        # Deferred so the standalone CLI can import templates without FastMCP.
+        from plugins.jules_plugin.plugin_config import JulesPlugin
         registry.lifecycle.register_plugin(JulesPlugin())
         _logger.info("Jules plugin registered successfully.")
     except Exception as e:
