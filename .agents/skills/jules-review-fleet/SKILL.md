@@ -51,8 +51,9 @@ julesbuild_review_fleet(roles="all", mode="full", repo="owner/name", branch="mai
 | `frontend-a` | 1 |
 | `frontend-a,backend-b,docs` | 3 |
 | `all` | frontend-a/b, backend-a/b, docs |
+| `transport,modding` | 2 custom domain sessions |
 
-Valid keys: `frontend-a`, `frontend-b`, `backend-a`, `backend-b`, `docs`.
+Valid keys: `frontend-a`, `frontend-b`, `backend-a`, `backend-b`, `docs`, or any domain slug. Distinct roles that sanitize to the same `CODE_HEALTH_*.md` filename (`frontend-a` + `Frontend-A`, `a/b` + `a?b`) raise.
 
 Examples:
 
@@ -67,7 +68,7 @@ Examples:
 
 Paths: `path`, `frontend_path`, `backend_path`, `docs_path` (default `.`).
 
-### Diff merge-base is fail-closed
+### Diff merge-base resilience
 
 A Jules session that cannot compute `git merge-base {base} HEAD` must **not**
 fall back to two-dot `{base}..HEAD`. Two-dot inverts `{base}`-only work into
@@ -75,8 +76,10 @@ phantom deletions on a shallow clone.
 
 1. `git merge-base {base} HEAD`
 2. On failure: `git fetch --unshallow origin` (or `git fetch --deepen=200 origin`)
-3. Retry merge-base. Still missing → **abort**; write a single finding that
-   merge-base is unavailable. Do not invent a file list.
+3. Retry merge-base. Still missing → record a shallow-clone notice at the top of
+   the report and review the scoped files on the branch directly. Do not abort
+   with an empty "Merge-base Unavailable" report, and do not invent a two-dot
+   file list.
 
 Prompts are expanded in `plugins/jules_plugin/review_fleet/templates.py`.
 
