@@ -96,11 +96,18 @@ You can set these in repository **Settings → Secrets and variables → Actions
 
 | Variable / Secret | Example Value | Purpose |
 | :--- | :--- | :--- |
-| **`PULLFROG_MODEL`** (Var) | `anthropic/claude-3-5-sonnet` | Default model slug to run. |
-| **`PULLFROG_EFFORT`** (Var) | `medium` | Default Claude thinking budget (`low`, `medium`, `high`, `max`). |
+| **`PULLFROG_AGENT`** (Var) | `opencode` | Agent harness to execute (`opencode`, `claude`, `codex`, `cursor`, `antigravity`, `grok`). Default: `opencode`. |
+| **`PULLFROG_MODEL`** (Var) | `meta/muse-spark-contributor` | Model slug to run (`meta/muse-spark-contributor`, `meta/muse-spark-1.3`, `openrouter/meta/muse-spark-1.3`). |
+| **`PULLFROG_EFFORT`** (Var) | `medium` | Reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
+| **`META_MODEL_API_KEY`** (Secret) | `sk-...` | Direct API key for Meta Model API (Muse Spark). |
+| **`OPENROUTER_API_KEY`** (Secret) | `sk-or-...` | OpenRouter API key for Muse Spark and other models. |
+| **`OPENCODE_API_KEY`** (Secret) | `sk-...` | OpenCode Zen API key. |
+| **`PULLFROG_GITHUB_TOKEN`** (Secret) | `ghp_...` | GitHub PAT with repo permissions (used if GitHub App credentials are not provided). |
+| **`PULLFROG_APP_ID`** (Secret) | `123456` | GitHub App ID to mint short-lived tokens. |
+| **`PULLFROG_APP_PRIVATE_KEY`** (Secret) | `-----BEGIN RSA...` | App Private Key PEM for GH API authentication. |
 | **`ANTHROPIC_API_KEY`** (Secret) | `sk-ant-...` | API token for Claude models. |
 | **`GEMINI_API_KEY`** (Secret) | `AIzaSy...` | API token for Google Gemini models. |
 | **`ANTIGRAVITY_TOKEN`** (Secret) | `oauth-token-...` | Token for Google Antigravity CLI (`agy`) runs. See [Setup Guide](../grok_antigravity_setup.md). |
 | **`GROK_AUTH_JSON`** (Secret) | `{"tokens":...}` | Credentials JSON (or Base64) for xAI Grok Build CLI runs. See [Setup Guide](../grok_antigravity_setup.md). |
-| **`PULLFROG_APP_ID`** (Secret) | `123456` | GitHub App ID to mint short-lived tokens. |
-| **`PULLFROG_APP_PRIVATE_KEY`** (Secret) | `-----BEGIN RSA...` | App Private Key PEM for GH API authentication. |
+| **`CURSOR_API_KEY`** (Secret) | `cur_...` | API token for Cursor CLI (`cursor-agent`) runs. |
+

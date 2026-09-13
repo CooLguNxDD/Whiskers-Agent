@@ -16,8 +16,12 @@ concurrency:
 
 jobs:
   address:
-    # Disabled
-    if: false
+    if: |
+      github.event.review.state == 'changes_requested' &&
+      (
+        github.event.review.user.type == 'Bot' ||
+        endsWith(github.event.review.user.login, '[bot]')
+      )
     permissions:
       contents: write
       id-token: write

@@ -28,8 +28,9 @@ concurrency:
 
 jobs:
   mention:
-    # Disabled
-    if: false
+    if: |
+      (github.event.comment && contains(github.event.comment.body, '@pullfrog')) ||
+      (github.event.issue && !github.event.comment && contains(github.event.issue.body, '@pullfrog'))
     permissions:
       contents: write
       id-token: write
