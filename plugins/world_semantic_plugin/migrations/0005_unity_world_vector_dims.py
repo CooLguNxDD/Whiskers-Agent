@@ -11,13 +11,12 @@ as route_embeddings / contact_embeddings / .env_sample embed config.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
 
 
 def upgrade(conn) -> None:
-    dim = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
+    from core.embedding_dimensions import embedding_dimensions
+    dim = embedding_dimensions()
     if dim < 1:
         dim = 1536
 

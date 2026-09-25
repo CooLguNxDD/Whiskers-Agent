@@ -18,6 +18,7 @@ Also creates the embedding_jobs queue consumed by the async embedding worker
 """
 
 from alembic import op
+from core.embedding_dimensions import embedding_dimensions
 
 revision = "core_014"
 down_revision = "core_013"
@@ -26,8 +27,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    import os
-    dim = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
+    dim = embedding_dimensions()
 
     # ------------------------------------------------------------------
     # route_embeddings — converge schema regardless of whether pro_001 ran.

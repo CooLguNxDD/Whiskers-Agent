@@ -27,6 +27,12 @@ from plugins.cat_fleet_chat_plugin.plugin_config import SETTINGS
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _TEXT_TYPES = ("application/json", "application/xml", "application/x-yaml", "application/yaml")
+_EXTRA_TYPES = {
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+}
 
 
 class AttachmentError(ValueError):
@@ -99,7 +105,13 @@ async def upload(
             "attachment_too_large", f"attachment is {len(data)} bytes; the limit is {limit}"
         )
     name = safe_filename(filename)
-    media = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+    extension = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    media = (
+        content_type
+        or mimetypes.guess_type(name)[0]
+        or _EXTRA_TYPES.get(extension)
+        or "application/octet-stream"
+    )
     key = f"fleet/{channel}/{uuid.uuid4().hex}/{name}"
     target = bucket()
     await get_artifact_store().put_bytes(target, key, data, media)
@@ -147,6 +159,9 @@ async def describe(descriptor: dict[str, Any], include_content: bool) -> dict[st
         result["content_omitted"] = f"{size} bytes exceeds the {cap}-byte inline limit; use presigned_url"
         return result
     data = await store.get_bytes(descriptor["bucket"], descriptor["object_key"])
+    if len(data) > cap:
+        result["content_omitted"] = f"{len(data)} bytes exceeds the {cap}-byte inline limit; use presigned_url"
+        return result
     if is_text(str(descriptor.get("content_type") or "")):
         result["content_text"] = data.decode("utf-8", errors="replace")
     else:

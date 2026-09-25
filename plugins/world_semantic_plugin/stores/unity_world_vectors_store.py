@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from typing import Any
 
 from sqlalchemy import delete
@@ -189,12 +188,10 @@ async def hex_similarity_scores(
 
 
 def _expected_embed_dimensions() -> int:
-    """Global EMBED_DIMENSIONS (same as .env / migration VECTOR width)."""
-    try:
-        dim = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
-    except (TypeError, ValueError):
-        dim = 1536
-    return dim if dim > 0 else 1536
+    """Provider-aware width shared with the world-vector migration."""
+    from core.embedding_dimensions import embedding_dimensions
+
+    return embedding_dimensions()
 
 
 def coerce_embedding(vec: list[float], *, expected: int | None = None) -> list[float]:

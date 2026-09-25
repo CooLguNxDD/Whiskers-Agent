@@ -5,14 +5,13 @@ Idempotent DDL throughout. Uses EMBED_DIMENSIONS for VECTOR width.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
+from core.embedding_dimensions import embedding_dimensions
 
 
 def upgrade(conn) -> None:
     """Create job_* tables and tenant seam if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "") or "1536"
+    dim = embedding_dimensions()
 
     conn.execute(
         text(

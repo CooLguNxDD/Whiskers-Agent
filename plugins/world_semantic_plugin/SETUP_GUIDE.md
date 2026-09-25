@@ -133,7 +133,7 @@ Escape hatch (blocking one-shot): `POST /api/world/{id}/index?sync=1` — not fo
 | Rank / search | `query_context` encoder + MCP `search_world_vectors` |
 | Not used | `hexes.embedding` column vectors; not mixed into `content_vectors` |
 
-**Dimension rule:** `EMBED_DIMENSIONS` is the global width for all embed tables (project default **1500**). Migration `0005` retypes `unity_world_vectors.embedding` to `VECTOR(EMBED_DIMENSIONS)`. If the local embed API returns a different width (e.g. 768), the worker pads/truncates to `EMBED_DIMENSIONS` before upsert.
+**Dimension rule:** `EMBED_DIMENSIONS` overrides the embedding provider's default width for all embed tables. Migration `0005` retypes `unity_world_vectors.embedding` to that resolved width. If the local embed API returns a different width, the worker pads/truncates to the resolved width before upsert.
 
 ```sql
 -- after index + embed workers finish

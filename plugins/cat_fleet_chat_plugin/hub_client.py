@@ -1,9 +1,8 @@
 """Async client for the Cat Fleet hub.
 
 The hub URL is manifest settings / ``CAT_FLEET_HUB_URL``, resolved here.
-No user- or agent-supplied URL is ever passed to httpx, so
-``core.proxy.ssrf_safety`` does not apply — that helper would also reject
-loopback unless ``CAT_ALLOW_LOCAL_PROXIES=1``.
+Hub URLs pass through the SSRF-safe transport. Local hub connections require
+``CAT_ALLOW_LOCAL_PROXIES=1``.
 
 Inside Docker the default target is ``http://host.docker.internal:8787``
 (compose already maps that name). A hub bound only to ``127.0.0.1`` is not
@@ -22,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from core.proxy.ssrf_safety import _is_safe_url, _safe_async_client
 from plugins.cat_fleet_chat_plugin.plugin_config import SETTINGS
 from utils.api_utils import safe_api_call
 
@@ -84,7 +84,7 @@ async def open_client() -> httpx.AsyncClient:
     """One process-wide client. Re-opened if a previous unload closed it."""
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(timeout=httpx.Timeout(normal_timeout()))
+        _client = _safe_async_client(timeout=httpx.Timeout(normal_timeout()))
     return _client
 
 
@@ -141,6 +141,8 @@ async def request_json(
     """
     client = await open_client()
     url = f"{hub_url()}{path}"
+    if not await _is_safe_url(url):
+        return {"status": "error", "error": "unsafe_url", "message": "hub URL is not allowed"}
     request_timeout = httpx.Timeout(timeout if timeout is not None else normal_timeout())
 
     async def make_request() -> httpx.Response:

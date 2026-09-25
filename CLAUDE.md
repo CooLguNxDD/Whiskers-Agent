@@ -249,7 +249,7 @@ agent.py                CLI search + graph execution
 core/                   platform: bootstrap, context, plugin_loader, proxy, proxy_tools,
                         route_registry, scope_management, api_key_management, user_management,
                         memory, artifact_store, telemetry, clustering, llm, llm_provider_management,
-                        dynamic_tools, interfaces
+                        dynamic_tools, interfaces, embedding_dimensions.py
                         (portfolio_plugin/ask/ holds the visitor-ask patch path — see §6)
 core_graph/             LangGraph orchestrator: node/, goap/, subgraphs/ (specialist/ holds the
                         spec+MCP-driven FlowSpec framework: flow_spec.py, flow_registry.py,
@@ -500,8 +500,9 @@ goals/                  agent goal files / achieve() persistence
   `agent_name` is self-declared. Hub URL comes from
   `CAT_FLEET_HUB_URL` (default `http://host.docker.internal:8787` in the
   container; `http://127.0.0.1:8787` on the host). A non-loopback hub requires
-  `CAT_FLEET_TOKEN`, matched by `CAT_FLEET_HUB_TOKEN` on the plugin. The HTTP
-  client is opened in `on_load` and closed in `on_unload`.
+  `CAT_FLEET_TOKEN`, matched by `CAT_FLEET_HUB_TOKEN` on the plugin. Local hub
+  addresses also require `CAT_ALLOW_LOCAL_PROXIES=1`; public hub connections
+  use the SSRF-safe transport. The HTTP client is opened in `on_load` and closed in `on_unload`.
   `fleet_set_channel_state` sets the hub's channel lifecycle enum
   (`active|paused|blocked|review|done|archived`, plugin mirror
   `CHANNEL_STATES` pinned by a test). Only `archived` changes behavior;
@@ -512,7 +513,7 @@ goals/                  agent goal files / achieve() persistence
   manifest's `settings.attachment_bucket` (default `cat-fleet-attachments`,
   auto-created, key `fleet/<channel>/<uuid>/<name>`, cap `attachment_max_bytes`)
   and posts the descriptor. `fleet_get_attachment` returns a presigned URL (and
-  inline content under `attachment_inline_max_bytes`) and **refuses any
+  inline content under `attachment_inline_max_bytes`, checked against downloaded bytes) and **refuses any
   descriptor outside that bucket/`fleet/` prefix**. Hub rows are caller data,
   so without the pin a crafted message could presign other buckets
   (e.g. job-search resumes). `fleet_post_message(attachments=…)` applies the

@@ -175,6 +175,16 @@ async def test_safe_api_call_normalizes_httpx_status_error():
     assert getattr(exc_info.value, "http_status", None) == 500
 
 
+def test_httpx_empty_error_body_uses_reason_phrase():
+    import httpx
+    from utils.api_utils import api_error_dict
+
+    response = httpx.Response(503, content=b"", request=httpx.Request("GET", "https://example.invalid/health"))
+    result = api_error_dict(response)
+    assert result["http_status"] == 503
+    assert "Service Unavailable" in result["message"]
+
+
 @pytest.mark.asyncio
 async def test_safe_api_call_normalizes_httpx_request_error():
     import httpx

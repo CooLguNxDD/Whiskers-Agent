@@ -11,7 +11,7 @@ Create Date: 2026-07-16
 
 from __future__ import annotations
 
-import os
+from core.embedding_dimensions import embedding_dimensions
 
 from alembic import op
 from sqlalchemy import text
@@ -30,7 +30,7 @@ _MEMORY_COLLECTIONS = (
 
 
 def _dim() -> str:
-    return os.environ.get("EMBED_DIMENSIONS", "") or "1536"
+    return str(embedding_dimensions())
 
 
 def _table_exists(conn, name: str) -> bool:

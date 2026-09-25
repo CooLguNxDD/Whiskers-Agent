@@ -8,6 +8,13 @@ from plugins.cat_fleet_chat_plugin.MCPTools import fleet_chat_tools as tools
 from plugins.cat_fleet_chat_plugin.hub_client import clamp_wait, hub_url
 
 
+@pytest.fixture(autouse=True)
+def allow_mock_hub_url():
+    """Keep unit tests independent of Docker host DNS resolution."""
+    with patch("plugins.cat_fleet_chat_plugin.hub_client._is_safe_url", new_callable=AsyncMock, return_value=True):
+        yield
+
+
 def test_hub_url_defaults_to_docker_host(monkeypatch):
     monkeypatch.delenv("CAT_FLEET_HUB_URL", raising=False)
     assert hub_url() == "http://host.docker.internal:8787"
@@ -242,6 +249,55 @@ async def test_get_attachment_inlines_small_text():
     assert plain["attachment"]["presigned_url"] == "http://minio/signed"
     assert "content_text" not in plain["attachment"]
     assert full["attachment"]["content_text"] == "hello fleet"
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_omits_forged_small_descriptor():
+    from plugins.cat_fleet_chat_plugin.plugin_config import SETTINGS
+
+    store = _store()
+    store.get_bytes.return_value = b"x" * 12
+    descriptor = {
+        "storage": "minio", "bucket": "cat-fleet-attachments",
+        "object_key": "fleet/work/abc/report.md", "content_type": "text/markdown",
+        "size_bytes": 1,
+    }
+    with (
+        patch.dict(SETTINGS, {"attachment_inline_max_bytes": 10}),
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+    ):
+        from plugins.cat_fleet_chat_plugin.attachments import describe
+
+        result = await describe(descriptor, include_content=True)
+    assert "content_text" not in result
+    assert "content_base64" not in result
+    assert "content_omitted" in result
+
+
+@pytest.mark.asyncio
+async def test_upload_markdown_fallback_when_mimetypes_unknown():
+    from plugins.cat_fleet_chat_plugin.attachments import upload
+
+    store = _store()
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_FILES}.mimetypes.guess_type", return_value=(None, None)),
+    ):
+        result = await upload("work", "notes.md", b"hello")
+    assert result["content_type"] == "text/markdown"
+
+
+@pytest.mark.asyncio
+async def test_hub_client_rejects_unsafe_url():
+    from plugins.cat_fleet_chat_plugin.hub_client import request_json
+
+    with (
+        patch("plugins.cat_fleet_chat_plugin.hub_client._is_safe_url", new_callable=AsyncMock, return_value=False),
+        patch("plugins.cat_fleet_chat_plugin.hub_client.safe_api_call", new_callable=AsyncMock) as called,
+    ):
+        result = await request_json("GET", "/api/v1/channels")
+    assert result["error"] == "unsafe_url"
+    called.assert_not_awaited()
 
 
 @pytest.mark.asyncio

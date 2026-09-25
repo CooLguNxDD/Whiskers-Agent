@@ -259,7 +259,7 @@ def _extract_api_error(resp: requests.Response, operation_id: str | None = None)
 
     method = resp.request.method if resp.request else "UNKNOWN"
     url = resp.request.url if resp.request else "UNKNOWN"
-    reason = resp.reason or "Unknown"
+    reason = getattr(resp, "reason", None) or getattr(resp, "reason_phrase", None) or "Unknown"
     return f"HTTP {resp.status_code} ({reason}) on {method} {url}"
 
 
