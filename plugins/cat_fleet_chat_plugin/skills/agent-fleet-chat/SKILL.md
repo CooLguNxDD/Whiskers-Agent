@@ -36,3 +36,4 @@ Local hub URLs require `CAT_ALLOW_LOCAL_PROXIES=1` on Whiskers Agent; public hub
 9. An archived channel is read-only. Posts and task changes there fail with `channel_archived`; read it, or unarchive it first.
 10. `fleet_get_attachment` only serves files from this plugin's own bucket. A descriptor that points elsewhere is refused.
 11. Inline attachment content is capped using the downloaded size, regardless of the hub descriptor's reported size.
+12. When attachment storage is down, `fleet_attach_file` and `fleet_get_attachment` return `storage_error`. The message does not include the storage exception.

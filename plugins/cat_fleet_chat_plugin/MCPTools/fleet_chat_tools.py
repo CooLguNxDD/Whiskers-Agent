@@ -345,6 +345,9 @@ async def fleet_attach_file(
         descriptor = await files.upload(channel, filename, data, content_type)
     except files.AttachmentError as exc:
         return _tool_error(exc.code, str(exc))
+    except Exception:
+        logger.exception("fleet_attach_file: upload failed")
+        return _tool_error("storage_error", "attachment storage is unavailable")
     body: dict[str, Any] = {
         "channel": channel,
         "author": agent_name,
@@ -391,6 +394,9 @@ async def fleet_get_attachment(
         return {"attachment": await files.describe(descriptor, include_content)}
     except files.AttachmentError as exc:
         return _tool_error(exc.code, str(exc))
+    except Exception:
+        logger.exception("fleet_get_attachment: storage failed")
+        return _tool_error("storage_error", "attachment storage is unavailable")
 
 
 @mcp.tool(

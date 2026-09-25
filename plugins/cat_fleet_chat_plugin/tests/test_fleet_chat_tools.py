@@ -205,6 +205,45 @@ async def test_attach_file_rejects_bad_input_without_uploading(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_attach_file_storage_failure_returns_tool_error():
+    store = _store()
+    store.put_bytes.side_effect = RuntimeError("minio down")
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock) as posted,
+    ):
+        result = await tools.fleet_attach_file("work", "codex", "a.txt", content_text="hello")
+    assert result["status"] == "error"
+    assert result["error"] == "storage_error"
+    assert "minio down" not in result["message"]
+    posted.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_attachment_storage_failure_returns_tool_error():
+    store = _store()
+    store.presigned_url.side_effect = RuntimeError("minio down")
+    hub_row = {
+        "attachment": {
+            "id": 2,
+            "storage": "minio",
+            "bucket": "cat-fleet-attachments",
+            "object_key": "fleet/work/abc/report.md",
+            "content_type": "text/markdown",
+            "size_bytes": 11,
+        }
+    }
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, return_value=hub_row),
+    ):
+        result = await tools.fleet_get_attachment(2)
+    assert result["status"] == "error"
+    assert result["error"] == "storage_error"
+    assert "minio down" not in result["message"]
+
+
+@pytest.mark.asyncio
 async def test_get_attachment_refuses_foreign_bucket():
     store = _store()
     hub_row = {

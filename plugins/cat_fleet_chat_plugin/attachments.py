@@ -56,14 +56,17 @@ def bucket() -> str:
 
 
 def max_bytes() -> int:
+    """Upload size cap in bytes (manifest ``attachment_max_bytes``, default 10 MB)."""
     return _setting_int("attachment_max_bytes", 10 * 1024 * 1024)
 
 
 def inline_max_bytes() -> int:
+    """Inline content cap in bytes (manifest ``attachment_inline_max_bytes``, default 256 KB)."""
     return _setting_int("attachment_inline_max_bytes", 256 * 1024)
 
 
 def url_ttl_seconds() -> int:
+    """Presigned URL lifetime in seconds (manifest ``attachment_url_ttl_s``); never below 60."""
     return max(60, _setting_int("attachment_url_ttl_s", 3600))
 
 
@@ -89,6 +92,7 @@ def decode_content(content_text: str | None, content_base64: str | None) -> byte
 
 
 def is_text(content_type: str) -> bool:
+    """True for ``text/*`` and known structured text types (JSON, XML, YAML)."""
     return content_type.startswith("text/") or content_type in _TEXT_TYPES
 
 

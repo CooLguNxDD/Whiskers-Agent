@@ -58,6 +58,7 @@ def _setting_int(name: str, default: int) -> int:
 
 
 def normal_timeout() -> float:
+    """Default hub request timeout in seconds (manifest ``request_timeout_s``)."""
     return float(_setting_int("request_timeout_s", 10))
 
 
@@ -89,6 +90,7 @@ async def open_client() -> httpx.AsyncClient:
 
 
 async def close_client() -> None:
+    """Close the shared client; next ``open_client`` reopens it."""
     global _client
     client = _client
     _client = None

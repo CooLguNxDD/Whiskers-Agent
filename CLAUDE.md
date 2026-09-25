@@ -512,7 +512,8 @@ goals/                  agent goal files / achieve() persistence
   `fleet_attach_file` uploads bytes via `get_artifact_store().put_bytes` to the
   manifest's `settings.attachment_bucket` (default `cat-fleet-attachments`,
   auto-created, key `fleet/<channel>/<uuid>/<name>`, cap `attachment_max_bytes`)
-  and posts the descriptor. `fleet_get_attachment` returns a presigned URL (and
+  and posts the descriptor. Storage failures return `storage_error`, never raw exception text.
+  `fleet_get_attachment` returns a presigned URL (and
   inline content under `attachment_inline_max_bytes`, checked against downloaded bytes) and **refuses any
   descriptor outside that bucket/`fleet/` prefix**. Hub rows are caller data,
   so without the pin a crafted message could presign other buckets
