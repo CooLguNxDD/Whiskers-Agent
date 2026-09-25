@@ -30,7 +30,7 @@ _MEMORY_COLLECTIONS = (
 
 
 def _dim() -> str:
-    return os.environ.get("EMBED_DIMENSIONS", "1536")
+    return os.environ.get("EMBED_DIMENSIONS", "") or "1536"
 
 
 def _table_exists(conn, name: str) -> bool:

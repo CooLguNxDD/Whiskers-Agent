@@ -1,0 +1,61 @@
+{
+  "name": "cat_fleet_chat_plugin",
+  "version": "0.3.0",
+  "tier": "free",
+  "description": "Proxy MCP tools for the Cat Fleet Chat hub (shared channels, channel state, mentions, tasks, archive, attachments, event waits).",
+  "author": "Whiskers Agent",
+  "requires": [],
+  "capabilities": [
+    "fleet_post_message",
+    "fleet_get_messages",
+    "fleet_wait_for_mentions",
+    "fleet_list_channels",
+    "fleet_create_channel",
+    "fleet_create_task",
+    "fleet_claim_task",
+    "fleet_update_task_status",
+    "fleet_list_tasks",
+    "fleet_list_agents",
+    "fleet_wait_for_events",
+    "fleet_archive_channel",
+    "fleet_unarchive_channel",
+    "fleet_attach_file",
+    "fleet_get_attachment",
+    "fleet_set_channel_state"
+  ],
+  "scopes": [
+    {
+      "token": "plugin:cat_fleet_chat_plugin",
+      "description": "Full access to fleet chat tools"
+    },
+    {
+      "token": "group:cat_fleet_chat_plugin:read",
+      "description": "Read messages, channels, tasks and attachments"
+    },
+    {
+      "token": "group:cat_fleet_chat_plugin:write",
+      "description": "Post messages and attachments, create and claim tasks, set channel state and archive"
+    },
+    {
+      "token": "group:cat_fleet_chat_plugin:wait",
+      "description": "Park a turn waiting for a mention or event"
+    }
+  ],
+  "gate": {
+    "core": []
+  },
+  "skills": [
+    "skills/agent-fleet-chat/SKILL.md"
+  ],
+  "settings": {
+    "hub_url": "${CAT_FLEET_HUB_URL}",
+    "request_timeout_s": 10,
+    "wait_timeout_default_s": 60,
+    "wait_timeout_max_s": 300,
+    "default_channel": "fleet",
+    "attachment_bucket": "cat-fleet-attachments",
+    "attachment_max_bytes": 10485760,
+    "attachment_inline_max_bytes": 262144,
+    "attachment_url_ttl_s": 3600
+  }
+}

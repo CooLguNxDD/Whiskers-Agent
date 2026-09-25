@@ -27,6 +27,7 @@ from core.context import http_route_registry
 from core.http_route_registry import AuthPolicy
 from core.context import mcp, oauth_provider
 from core.proxy.proxy_manager import proxy_manager
+from core.proxy.proxy_registration import upstream_oauth_manifest
 from db_layer.route_store import delete_plugin_route_embeddings
 from utils.server_config import MAX_PROXY_CUSTOM_DESCRIPTION_CHARS
 
@@ -245,23 +246,10 @@ async def start_proxy_oauth_route(request: Request) -> Response:
         if not oauth_config:
             return JSONResponse({"error": "invalid_config", "message": "OAuth config is missing for this proxy."}, status_code=400)
 
-        # Register synthetic manifest
-        manifest = {
-            "name": f"proxy_{name}",
-            "version": "1.0.0",
-            "tier": 1,
-            "external_oauth": {
-                "upstream": {
-                    "authorize_url": oauth_config.get("authorize_url"),
-                    "token_url": oauth_config.get("token_url"),
-                    "client_id": oauth_config.get("client_id"),
-                    "scopes": oauth_config.get("scopes", []),
-                    "pkce": oauth_config.get("pkce", "S256"),
-                    "redirect_path": "/oauth/plugin/upstream/callback",
-                    "auth_header": oauth_config.get("auth_header", "Authorization")
-                }
-            }
-        }
+        # Register synthetic manifest (RFC 8707 resource = proxy MCP URL)
+        manifest = upstream_oauth_manifest(
+            name, oauth_config, resource=proxy.get("url")
+        )
         
         from core.context import oauth_relay, MCP_SERVER_URL
         if not oauth_relay:

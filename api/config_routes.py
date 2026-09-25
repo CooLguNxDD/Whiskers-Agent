@@ -71,7 +71,7 @@ def _env_defaults() -> dict:
         "embed_provider": os.environ.get("EMBED_PROVIDER", ""),
         "embed_model": os.environ.get("EMBED_MODEL", ""),
         "embed_base_url": os.environ.get("EMBED_BASE_URL", ""),
-        "embed_dimensions": int(os.environ.get("EMBED_DIMENSIONS", "1536")),
+        "embed_dimensions": int(os.environ.get("EMBED_DIMENSIONS", "") or 1536),
         "rag_enabled": True,
         "local_llm_enabled": False,
         "local_base_url": os.environ.get("LLM_BASE_URL", ""),

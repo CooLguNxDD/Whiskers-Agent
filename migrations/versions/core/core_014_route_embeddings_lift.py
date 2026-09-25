@@ -27,7 +27,7 @@ depends_on = None
 
 def upgrade() -> None:
     import os
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
 
     # ------------------------------------------------------------------
     # route_embeddings — converge schema regardless of whether pro_001 ran.

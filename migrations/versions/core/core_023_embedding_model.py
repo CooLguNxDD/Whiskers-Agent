@@ -56,7 +56,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = os.environ.get("EMBED_DIMENSIONS", "") or "1536"
     default_model_id = get_default_model_id()
 
     # 1. Drop embedding_model from tool_config

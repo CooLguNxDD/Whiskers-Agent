@@ -151,6 +151,58 @@ async def test_safe_api_call_http_error_raise(mock_to_thread):
 
 
 @pytest.mark.asyncio
+async def test_safe_api_call_normalizes_httpx_status_error():
+    import httpx
+    from fastmcp.exceptions import ToolError
+
+    response = httpx.Response(
+        500,
+        json={"message": "health dependency failed"},
+        request=httpx.Request("GET", "https://example.invalid/health"),
+    )
+
+    with pytest.raises(ToolError) as exc_info:
+        await safe_api_call(
+            lambda: response,
+            lambda resp: resp.json(),
+            context="Upstream health",
+            operation_id="HealthController_GetHealth",
+            raise_tool_error=True,
+        )
+
+    assert "Upstream health" in str(exc_info.value)
+    assert "health dependency failed" in str(exc_info.value)
+    assert getattr(exc_info.value, "http_status", None) == 500
+
+
+@pytest.mark.asyncio
+async def test_safe_api_call_normalizes_httpx_request_error():
+    import httpx
+    from fastmcp.exceptions import ToolError
+
+    request_error = httpx.ConnectError(
+        "connection refused",
+        request=httpx.Request("GET", "https://example.invalid/health"),
+    )
+
+    def make_request():
+        raise request_error
+
+    with pytest.raises(ToolError) as exc_info:
+        await safe_api_call(
+            make_request,
+            lambda resp: resp.json(),
+            context="Upstream health",
+            operation_id="HealthController_GetHealth",
+            raise_tool_error=True,
+        )
+
+    assert "Upstream health" in str(exc_info.value)
+    assert "connection refused" in str(exc_info.value)
+    assert getattr(exc_info.value, "api_error_type", None) == "request_failed"
+
+
+@pytest.mark.asyncio
 @patch("utils.api_utils.asyncio.to_thread")
 async def test_safe_api_call_500_propagates(mock_to_thread):
     resp = MagicMock(spec=requests.Response)

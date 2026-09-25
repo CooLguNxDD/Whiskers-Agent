@@ -223,7 +223,7 @@ keeps the key and is not externally re-shaped.
 | Plugin loader | `core/plugin_loader/` | Two-pass async discovery, toposort deps, hot-swap, event-bus lifecycle (`tools.enable`, `routes.contribute`, …), content-hash staleness, skills/poll_specs/scopes/config registries. `types.py` holds `IPlugin`/`IPluginContext` (`typing.Protocol`) + `PluginManifest` (`TypedDict`) — no runtime imports of sibling loader modules, mirrors `core/interfaces/`'s convention. `Plugin.on_ready` (`plugin.py`) reads `ctx._registry` directly rather than the global `get_registry()` singleton, which is what keeps `plugin.py` free of any import on `plugin_registry.py` (a real `plugin_registry` → `plugin` → `plugin_registry` cycle would otherwise fire, since `plugin_registry.py` imports the concrete `Plugin` class at module level for the re-export every `plugin_config.py` relies on). `plugin_lifecycle_registry.py` types `register_plugin`/`_plugins`/`_plugin_id_map` against `IPlugin` instead of the concrete class. `test_plugin_loader_import_cycles.py` AST-scans the package for module-level cycles on every run. |
 | Scope management | `core/scope_management/` | `ScopeManager`, ordered rules (incl. `plugin_gate_ceiling`), `PrincipalKind`, sentinels `all`/`*`, policy `enforce|audit|off`, three-level grammar (`grammar.py`), plugin gates (`gates.py`/`gate_overlay.py`), legacy-token compat (`legacy_map.py`), C01–C20 contracts. |
 | Route registry / catalog | `core/route_registry/` | `OperationDescriptor` + `OperationCatalog` (revision/etag, scope-aware filter), host HTTP mirror, `execute.py` (jsonschema-validated), OpenAPI export. |
-| Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). |
+| Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). OAuth proxies inject tokens via `RelayAuth` (`httpx2.Auth` — FastMCP 4 / MCP SDK v2 reject `httpx.Auth` as `Invalid "auth" argument`, which `ProxyProvider.list_tools` then mounts as 0 namespaced tools). `create_proxy(..., provider_error_strategy="raise")` so a connect failure cannot look like a successful empty catalog. Layer-2 proxy OAuth sends RFC 8707 `resource` (canonical MCP URL) on authorize, token, and refresh — Atlassian `/v2/mcp` 401s tokens issued without it. |
 | Auth | `oauth/`, `core/api_key_management/`, `core/user_management/` | Layer 1 inbound RS256 JWT + PKCE; Layer 2 per-plugin external OAuth relay; pgcrypto API keys (`[]`=deny-all, `["all"]`=bypass). `core/auth_service.py::get_auth_service()` is the plugin-facing boundary (`IAuthService`) — `principal_from_bearer`/`principal_from_session_cookie`/`mint_scoped_token` wrap `core.context._oauth_svc` + `core.api_key_management.store` so plugins never touch `oauth_provider._svc` or `OAuthService._mint_jwt` directly; mounted on `PluginContext.auth_service`. |
 | Memory | `core/memory/` | Tenant-scoped namespaces; backends `memory` → `memory_content_vectors`, `search` → `search_content_vectors`. `memory_plugin` is an MCP façade only. |
 | Search engine | `db_layer/embeddings/search_engine.py` | Single choke point: `SearchSpec` + `search()` decides hybrid (dense cosine + `ts_rank_cd` FTS + RRF) vs dense-only per collection. All 6 search paths are thin adapters. |
@@ -268,7 +268,7 @@ oauth/                  OAuthService (L1), ExternalOAuthRelay (L2), provider + r
 plugins/                portfolio_plugin, job_search_plugin
                         (posting_ingest.py, portfolio_link.py, flow_specs/career_ops_apply_v1.json),
                         search_plugin, memory_plugin, jules_plugin, cat_terminal_relay_plugin,
-                        world_semantic_plugin
+                        world_semantic_plugin, cat_fleet_chat_plugin
 utils/                  response_shape/response_format (11-step pipeline), api_utils, short_id,
                         config_registry, server_config, error_response, minio_client, telemetry,
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
@@ -492,6 +492,31 @@ goals/                  agent goal files / achieve() persistence
   passes this gate, same as every other `evaluate_access` call site.
 - **jules_plugin** — Jules cloud-agent sessions + review fleet; poll_specs drive wait-step injection.
 - **world_semantic_plugin** — Unity hex-world spatial context (index/diff HTTP + MCP query tools).
+- **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
+  (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
+  Tools are tagged `read` / `write` / `wait` so those scope groups are independent.
+  `fleet_wait_for_mentions` and `fleet_wait_for_events` are in
+  `GOAP_CANDIDATE_DENYLIST` (a blocking park must not be a plan step).
+  `agent_name` is self-declared. Hub URL comes from
+  `CAT_FLEET_HUB_URL` (default `http://host.docker.internal:8787` in the
+  container; `http://127.0.0.1:8787` on the host). A non-loopback hub requires
+  `CAT_FLEET_TOKEN`, matched by `CAT_FLEET_HUB_TOKEN` on the plugin. The HTTP
+  client is opened in `on_load` and closed in `on_unload`.
+  `fleet_set_channel_state` sets the hub's channel lifecycle enum
+  (`active|paused|blocked|review|done|archived`, plugin mirror
+  `CHANNEL_STATES` pinned by a test). Only `archived` changes behavior;
+  `fleet_archive_channel`/`fleet_unarchive_channel` are shorthands for it
+  (read-only channel; open tasks refuse it unless `force` cancels them).
+  **Attachments** (`attachments.py`): the hub stores descriptors only;
+  `fleet_attach_file` uploads bytes via `get_artifact_store().put_bytes` to the
+  manifest's `settings.attachment_bucket` (default `cat-fleet-attachments`,
+  auto-created, key `fleet/<channel>/<uuid>/<name>`, cap `attachment_max_bytes`)
+  and posts the descriptor. `fleet_get_attachment` returns a presigned URL (and
+  inline content under `attachment_inline_max_bytes`) and **refuses any
+  descriptor outside that bucket/`fleet/` prefix**. Hub rows are caller data,
+  so without the pin a crafted message could presign other buckets
+  (e.g. job-search resumes). `fleet_post_message(attachments=…)` applies the
+  same check. The bucket is deliberately not in the `artifact_sweep` allowlist.
 
 ---
 
@@ -558,6 +583,10 @@ Config in `pyproject.toml` and `requirements-dev.txt`. Pullfrog agent workflows 
 | `DATABASE_URL` | no | `postgresql://mcp:mcp@db:5432/mcp` |
 | `LLM_PROVIDER` | no | `openai` |
 | `OPENAI_API_KEY` | conditional | required when `LLM_PROVIDER=openai` |
+| `EMBED_PROVIDER` | no | inherits `LLM_PROVIDER`; use `openai` for LM Studio's OpenAI-compatible API |
+| `EMBED_MODEL` | no | provider default; Qwen3 Embedding 0.6B is `text-embedding-qwen3-embedding-0.6b` |
+| `EMBED_DIMENSIONS` | no | provider default; Qwen3 Embedding 0.6B uses `1024` |
+| `EMBED_BASE_URL` | no | OpenAI-compatible embedding endpoint, e.g. `http://host.docker.internal:1234/v1` from Docker |
 
 API keys, sessions, and keypairs live in Postgres (`api_keys`, `auth_keypairs`, `oauth_tokens`),
 encrypted under `MASTER_KEY` via pgcrypto.
@@ -568,6 +597,10 @@ encrypted under `MASTER_KEY` via pgcrypto.
   renaming produces a fresh empty DB that looks like "keys vanished".
 - `MASTER_KEY` must be byte-identical across restarts/deploys. Drift silently breaks decrypt in
   `_load_private_key`; `phase_keypair_guard` (`core/bootstrap/`) fails the container loudly at boot.
+- For LM Studio embeddings, load Qwen3 Embedding 0.6B, enable the local server on port `1234`,
+  and set `EMBED_PROVIDER=openai`, `EMBED_MODEL=text-embedding-qwen3-embedding-0.6b`,
+  `EMBED_DIMENSIONS=1024`, `EMBED_BASE_URL=http://host.docker.internal:1234/v1`, and
+  `EMBED_PROFILE=lmstudio` in the local `.env`.
 - Revoke (`POST /api/auth/api-keys/{key_id}/revoke`) rotates: revokes and returns a fresh replacement token.
 - `scripts/reseed.py` without `--full` intentionally leaves `api_keys` / `auth_keypairs` alone.
 

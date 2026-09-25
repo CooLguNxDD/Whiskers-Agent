@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 def upgrade(conn) -> None:
     """Rename content_vectors if present; create search_content_vectors if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = os.environ.get("EMBED_DIMENSIONS", "") or "1536"
     exists_old = conn.execute(
         text(
             "SELECT 1 FROM information_schema.tables "

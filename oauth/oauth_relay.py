@@ -30,7 +30,7 @@ import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy import Text, cast, delete, func, select
@@ -71,6 +71,36 @@ def _to_utc_aware(dt: datetime) -> datetime:
     if dt.tzinfo:
         return dt.astimezone(timezone.utc)
     return dt.replace(tzinfo=timezone.utc)
+
+
+def canonical_resource_url(url: str) -> str:
+    """RFC 8707 canonical resource URI: lowercase scheme/host, no fragment."""
+    parsed = urlsplit((url or "").strip())
+    return urlunsplit(
+        parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower(),
+            fragment="",
+        )
+    )
+
+
+def _resource_from_cfg(cfg: dict) -> str | None:
+    """Optional RFC 8707 resource from a provider config block."""
+    raw = cfg.get("resource")
+    if not isinstance(raw, str):
+        return None
+    raw = raw.strip()
+    return raw or None
+
+
+def _oauth_form_extras(cfg: dict) -> dict[str, str]:
+    """Extra token/authorize fields. MCP clients MUST send ``resource`` (RFC 8707)."""
+    extras: dict[str, str] = {}
+    resource = _resource_from_cfg(cfg)
+    if resource:
+        extras["resource"] = resource
+    return extras
 
 
 def _encrypted_text(value: str):
@@ -144,6 +174,7 @@ class ExternalOAuthRelay:
             "code_challenge": challenge,
             "code_challenge_method": "S256",  # providers see standard method
         }
+        params.update(_oauth_form_extras(cfg))
         query = urlencode(params)
         full_url = f"{authorize_url}{'&' if '?' in authorize_url else '?'}{query}"
         logger.info(
@@ -221,6 +252,7 @@ class ExternalOAuthRelay:
             "client_id": client_id,
             "code_verifier": verifier,
         }
+        payload.update(_oauth_form_extras(cfg))
         if client_secret:
             payload["client_secret"] = client_secret
 
@@ -381,6 +413,7 @@ class ExternalOAuthRelay:
             "refresh_token": refresh_token,
             "client_id": client_id,
         }
+        payload.update(_oauth_form_extras(cfg))
         if client_secret:
             payload["client_secret"] = client_secret
 

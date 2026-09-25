@@ -235,6 +235,7 @@ async def test_add_proxy_oauth_setup():
         manifest = called_args[1]
         assert manifest["name"] == "proxy_test-pm-oauth"
         assert manifest["external_oauth"]["upstream"]["client_id"] == "test-client-id"
+        assert manifest["external_oauth"]["upstream"]["resource"] == "http://localhost:9000"
 
 
 @pytest.mark.asyncio
@@ -250,7 +251,7 @@ async def test_add_proxy_oauth_autodiscovery_and_dcr():
         
         resp1 = MagicMock()
         resp1.status_code = 401
-        resp1.headers = {"www-authenticate": 'Bearer realm="mcp", ResourceMetadata="http://localhost:9000/metadata"'}
+        resp1.headers = {"www-authenticate": 'Bearer realm="mcp", resource_metadata="http://localhost:9000/metadata"'}
         
         resp2 = MagicMock()
         resp2.status_code = 200
@@ -300,6 +301,7 @@ async def test_add_proxy_oauth_autodiscovery_and_dcr():
         assert manifest["external_oauth"]["upstream"]["client_id"] == "auto-discovered-client-id"
         assert manifest["external_oauth"]["upstream"]["authorize_url"] == "https://auth.provider.com/authorize"
         assert manifest["external_oauth"]["upstream"]["token_url"] == "https://auth.provider.com/token"
+        assert manifest["external_oauth"]["upstream"]["resource"] == "http://localhost:9000"
 
 
 @pytest.mark.asyncio

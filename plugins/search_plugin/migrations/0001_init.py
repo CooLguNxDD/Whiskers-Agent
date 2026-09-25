@@ -13,7 +13,7 @@ from sqlalchemy import text
 
 def upgrade(conn) -> None:
     """Create content_vectors (+ tenant seam) if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = os.environ.get("EMBED_DIMENSIONS", "") or "1536"
     conn.execute(
         text(
             f"""

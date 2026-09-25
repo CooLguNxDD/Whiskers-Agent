@@ -23,6 +23,7 @@ import json
 import logging
 from typing import Any, Callable, TypeVar, Awaitable
 
+import httpx
 import requests
 
 from utils.response_shape import apply_shape_async, offload_raw_result
@@ -377,9 +378,19 @@ def _handle_api_exception(
     """Extract exception handling logic from safe_api_call."""
     from fastmcp.exceptions import ToolError
 
-    if isinstance(exc, requests.exceptions.HTTPError):
-        if resp is not None:
-            if resp.status_code == 401:
+    # OpenAPI-backed tools use httpx, while older callers use requests. Both
+    # status-error types expose the failed response, so classify the latter by
+    # that stable interface instead of the client-specific exception class.
+    exception_response = getattr(exc, "response", None)
+    has_response_status = (
+        exception_response is not None
+        and isinstance(getattr(exception_response, "status_code", None), int)
+    )
+
+    if isinstance(exc, requests.exceptions.HTTPError) or has_response_status:
+        error_response = resp or exception_response
+        if error_response is not None:
+            if error_response.status_code == 401:
                 inferred_plugin_id = plugin_id or _infer_plugin_id()
                 if inferred_plugin_id:
                     try:
@@ -387,7 +398,7 @@ def _handle_api_exception(
                         get_registry().auth.mark_needs_reauth(inferred_plugin_id)
                     except Exception as mark_exc:
                         logger.warning("safe_api_call: failed to mark plugin as needs_reauth: %s", mark_exc)
-            error = api_error_dict(resp, context, **extra_error_fields)
+            error = api_error_dict(error_response, context, **extra_error_fields)
         else:
             error = {
                 "status": "error",
@@ -397,11 +408,15 @@ def _handle_api_exception(
             }
         logger.error(f"✗ {error['message']}")
         if raise_tool_error:
-            if resp is not None and resp.status_code >= 500:
+            # Keep the historical requests 5xx propagation used by graph
+            # recovery, but turn httpx status errors into MCP ToolErrors so
+            # FastMCP receives the upstream status/message instead of a
+            # generic "Error calling tool" wrapper.
+            if isinstance(exc, requests.exceptions.HTTPError) and resp is not None and resp.status_code >= 500:
                 raise _attach_error_meta(exc, error)
             raise _attach_error_meta(ToolError(error["message"]), error)
         return error
-    elif isinstance(exc, requests.exceptions.RequestException):
+    elif isinstance(exc, (requests.exceptions.RequestException, httpx.RequestError)):
         error = {
             "status": "error",
             "error": "request_failed",

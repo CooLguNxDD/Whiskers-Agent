@@ -84,26 +84,51 @@ async def persist_proxy_content_hash(
         )
 
 
+def upstream_oauth_manifest(
+    name: str,
+    oauth_config: dict,
+    *,
+    resource: str | None = None,
+) -> dict:
+    """Synthetic Layer-2 manifest for ``proxy_{name}``.
+
+    ``resource`` is the RFC 8707 resource indicator (canonical MCP URL). When
+    omitted, fall back to ``oauth_config['resource']``.
+    """
+    from oauth.oauth_relay import canonical_resource_url
+
+    resource_url = resource or oauth_config.get("resource")
+    if isinstance(resource_url, str) and resource_url.strip():
+        resource_url = canonical_resource_url(resource_url)
+    else:
+        resource_url = None
+
+    upstream = {
+        "authorize_url": oauth_config.get("authorize_url"),
+        "token_url": oauth_config.get("token_url"),
+        "client_id": oauth_config.get("client_id"),
+        "scopes": oauth_config.get("scopes", []),
+        "pkce": oauth_config.get("pkce", "S256"),
+        "redirect_path": "/oauth/plugin/upstream/callback",
+        "auth_header": oauth_config.get("auth_header", "Authorization"),
+    }
+    if resource_url:
+        upstream["resource"] = resource_url
+    return {
+        "name": f"proxy_{name}",
+        "version": "1.0.0",
+        "tier": 1,
+        "external_oauth": {"upstream": upstream},
+    }
+
+
 async def upsert_oauth_manifest(proxy: "ProxyServer") -> None:
     """Register synthetic OAuth manifest for a proxy row."""
     if proxy.auth_mode != "oauth" or not proxy.oauth_config:
         return
-    manifest = {
-        "name": f"proxy_{proxy.name}",
-        "version": "1.0.0",
-        "tier": 1,
-        "external_oauth": {
-            "upstream": {
-                "authorize_url": proxy.oauth_config.get("authorize_url"),
-                "token_url": proxy.oauth_config.get("token_url"),
-                "client_id": proxy.oauth_config.get("client_id"),
-                "scopes": proxy.oauth_config.get("scopes", []),
-                "pkce": proxy.oauth_config.get("pkce", "S256"),
-                "redirect_path": "/oauth/plugin/upstream/callback",
-                "auth_header": proxy.oauth_config.get("auth_header", "Authorization"),
-            }
-        },
-    }
+    manifest = upstream_oauth_manifest(
+        proxy.name, proxy.oauth_config, resource=getattr(proxy, "url", None)
+    )
     from core.context import oauth_relay
     if oauth_relay:
         await oauth_relay.upsert_manifest(f"proxy_{proxy.name}", manifest)
