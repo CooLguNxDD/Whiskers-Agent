@@ -336,13 +336,21 @@ async def fleet_attach_file(
     message body (defaults to "attached <filename>"); its @handles become
     mentions. Returns the hub message; ``attachments[0].id`` is what
     ``fleet_get_attachment`` takes. A retry with the same
-    ``client_request_id`` uploads a new object but posts no second message.
+    ``client_request_id`` and the same file reuses the object key so the hub
+    can replay the original message. A failed hub post deletes the object.
     """
     if not _CHANNEL_RE.fullmatch(channel or ""):
         return _tool_error("validation_error", "channel must match [a-z0-9][a-z0-9_-]{0,63}")
     try:
         data = files.decode_content(content_text, content_base64)
-        descriptor = await files.upload(channel, filename, data, content_type)
+        object_key = (
+            files.stable_object_key(channel, filename, data, client_request_id)
+            if client_request_id
+            else None
+        )
+        descriptor = await files.upload(
+            channel, filename, data, content_type, object_key=object_key
+        )
     except files.AttachmentError as exc:
         return _tool_error(exc.code, str(exc))
     except Exception:
@@ -357,12 +365,20 @@ async def fleet_attach_file(
     }
     if reply_to is not None:
         body["reply_to"] = reply_to
-    return await request_json(
-        "POST",
-        "/api/v1/messages",
-        body=body,
-        tool_name="fleet_attach_file",
-    )
+    try:
+        result = await request_json(
+            "POST",
+            "/api/v1/messages",
+            body=body,
+            tool_name="fleet_attach_file",
+        )
+    except Exception:
+        await files.delete(descriptor)
+        logger.exception("fleet_attach_file: hub post failed")
+        return _tool_error("api_error", "hub request failed")
+    if isinstance(result, dict) and result.get("status") == "error":
+        await files.delete(descriptor)
+    return result
 
 
 @mcp.tool(

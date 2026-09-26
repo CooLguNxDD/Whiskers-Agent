@@ -52,6 +52,7 @@ plugins/world_semantic_plugin/migrations/
   0003_index_jobs.py           # durable world_index_jobs queue
   0004_unity_world_vectors.py  # dedicated Unity RAG vectors (not content_vectors)
   0005_unity_world_vector_dims.py  # retype embedding to global EMBED_DIMENSIONS
+  0008_unity_world_vector_dims_resync.py  # same rewrite; 0005 does not re-run after a dim change
 ```
 
 Each step exposes `upgrade(conn)`. With `manifest.json` → `schema.auto_migrate: true`, they apply on plugin load. Confirm rows in `plugin_schema_revisions` for `world_semantic_plugin`.

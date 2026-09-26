@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import logging
 import mimetypes
 import re
 import uuid
@@ -24,6 +25,8 @@ from typing import Any
 from core.artifact_store import get_artifact_store
 
 from plugins.cat_fleet_chat_plugin.plugin_config import SETTINGS
+
+logger = logging.getLogger("whiskers.cat_fleet_chat")
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _TEXT_TYPES = ("application/json", "application/xml", "application/x-yaml", "application/yaml")
@@ -96,13 +99,57 @@ def is_text(content_type: str) -> bool:
     return content_type.startswith("text/") or content_type in _TEXT_TYPES
 
 
+def stable_object_key(
+    channel: str,
+    filename: str,
+    data: bytes,
+    client_request_id: str,
+) -> str:
+    """Deterministic ``fleet/{channel}/{hex}/{name}`` for an idempotent attach retry.
+
+    Hash material is request id + channel + sanitized filename + content digest
+    so a same-payload retry overwrites the same object, while a different file
+    under the same request id lands on a new key (hub 409 then delete is safe).
+    """
+    name = safe_filename(filename)
+    digest = hashlib.sha256(
+        b"\0".join(
+            (
+                client_request_id.encode("utf-8"),
+                channel.encode("utf-8"),
+                name.encode("utf-8"),
+                hashlib.sha256(data).digest(),
+            )
+        )
+    ).hexdigest()
+    return f"fleet/{channel}/{digest}/{name}"
+
+
+def _owned_object_key(channel: str, filename: str, object_key: str) -> str:
+    name = safe_filename(filename)
+    if (
+        not object_key.startswith(f"fleet/{channel}/")
+        or ".." in object_key.split("/")
+        or not object_key.endswith("/" + name)
+    ):
+        raise AttachmentError("validation_error", "object_key is not valid for this upload")
+    return object_key
+
+
 async def upload(
     channel: str,
     filename: str,
     data: bytes,
     content_type: str | None = None,
+    *,
+    object_key: str | None = None,
 ) -> dict[str, Any]:
-    """Store ``data`` and return the hub attachment descriptor."""
+    """Store ``data`` and return the hub attachment descriptor.
+
+    ``object_key`` must be a plugin-owned ``fleet/{channel}/.../{filename}``
+    path (use ``stable_object_key`` for idempotent retries). Omitted, a fresh
+    UUID segment is used.
+    """
     limit = max_bytes()
     if len(data) > limit:
         raise AttachmentError(
@@ -116,7 +163,11 @@ async def upload(
         or _EXTRA_TYPES.get(extension)
         or "application/octet-stream"
     )
-    key = f"fleet/{channel}/{uuid.uuid4().hex}/{name}"
+    key = (
+        _owned_object_key(channel, filename, object_key)
+        if object_key
+        else f"fleet/{channel}/{uuid.uuid4().hex}/{name}"
+    )
     target = bucket()
     await get_artifact_store().put_bytes(target, key, data, media)
     return {
@@ -128,6 +179,15 @@ async def upload(
         "object_key": key,
         "sha256": hashlib.sha256(data).hexdigest(),
     }
+
+
+async def delete(descriptor: dict[str, Any]) -> None:
+    """Best-effort delete of a plugin-owned object. Failures are logged, not raised."""
+    try:
+        check_owned(descriptor)
+        await get_artifact_store().remove_bytes(descriptor["bucket"], descriptor["object_key"])
+    except Exception:
+        logger.exception("fleet attachment delete failed")
 
 
 def check_owned(descriptor: dict[str, Any]) -> None:

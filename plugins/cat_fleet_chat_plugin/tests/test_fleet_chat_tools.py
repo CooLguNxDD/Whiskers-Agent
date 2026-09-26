@@ -154,6 +154,7 @@ def _store():
     store.put_bytes.return_value = "key"
     store.presigned_url.return_value = "http://minio/signed"
     store.get_bytes.return_value = b"hello fleet"
+    store.remove_bytes.return_value = None
     return store
 
 
@@ -180,6 +181,81 @@ async def test_attach_file_uploads_to_manifest_bucket_then_posts():
     assert descriptor["bucket"] == bucket and descriptor["object_key"] == key
     assert descriptor["size_bytes"] == 11 and len(descriptor["sha256"]) == 64
     assert body["text"] == "@claude see"
+
+
+@pytest.mark.asyncio
+async def test_attach_file_reuses_stable_key_for_same_request_id():
+    from plugins.cat_fleet_chat_plugin.attachments import stable_object_key
+
+    store = _store()
+    expected = stable_object_key("work", "report.md", b"hello fleet", "req-1")
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, return_value={"message": {"id": 7}}) as posted,
+    ):
+        first = await tools.fleet_attach_file(
+            "work", "codex", "report.md", content_text="hello fleet", client_request_id="req-1"
+        )
+        second = await tools.fleet_attach_file(
+            "work", "codex", "report.md", content_text="hello fleet", client_request_id="req-1"
+        )
+    assert first == second == {"message": {"id": 7}}
+    keys = [call.args[1] for call in store.put_bytes.await_args_list]
+    assert keys == [expected, expected]
+    assert posted.await_count == 2
+    store.remove_bytes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_file_deletes_object_when_hub_post_fails():
+    store = _store()
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(
+            f"{_TOOLS}.request_json",
+            new_callable=AsyncMock,
+            return_value={"status": "error", "error": "api_error", "http_status": 500},
+        ),
+    ):
+        result = await tools.fleet_attach_file("work", "codex", "a.txt", content_text="hello")
+    assert result["status"] == "error"
+    assert result["error"] == "api_error"
+    bucket, key, _data, _media = store.put_bytes.await_args.args
+    store.remove_bytes.assert_awaited_once_with(bucket, key)
+
+
+@pytest.mark.asyncio
+async def test_attach_file_deletes_object_on_payload_conflict():
+    store = _store()
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(
+            f"{_TOOLS}.request_json",
+            new_callable=AsyncMock,
+            return_value={"status": "error", "error": "payload_mismatch", "http_status": 409},
+        ),
+    ):
+        result = await tools.fleet_attach_file(
+            "work", "codex", "a.txt", content_text="hello", client_request_id="req-1"
+        )
+    assert result["http_status"] == 409
+    bucket, key, _data, _media = store.put_bytes.await_args.args
+    store.remove_bytes.assert_awaited_once_with(bucket, key)
+
+
+@pytest.mark.asyncio
+async def test_attach_file_keeps_object_on_idempotent_replay():
+    store = _store()
+    replay = {"message": {"id": 7, "client_request_id": "req-1"}}
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, return_value=replay),
+    ):
+        result = await tools.fleet_attach_file(
+            "work", "codex", "a.txt", content_text="hello", client_request_id="req-1"
+        )
+    assert result == replay
+    store.remove_bytes.assert_not_awaited()
 
 
 @pytest.mark.asyncio

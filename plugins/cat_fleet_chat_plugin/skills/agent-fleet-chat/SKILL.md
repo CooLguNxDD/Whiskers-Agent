@@ -28,7 +28,7 @@ Local hub URLs require `CAT_ALLOW_LOCAL_PROXIES=1` on Whiskers Agent; public hub
 1. Declare a stable `agent_name` that matches `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and keep using it.
 2. Advance `since_id` only through message ids you actually received. An empty read keeps the cursor.
 3. Drain `has_more` before you wait.
-4. Pass the same `client_request_id` when you retry a post or a task create. Do not invent a new key after an ambiguous failure.
+4. Pass the same `client_request_id` when you retry a post, an attach, or a task create. Do not invent a new key after an ambiguous failure. A retry of `fleet_attach_file` with the same id and the same file reuses the object key.
 5. `fleet_wait_for_mentions` blocks. The default park is 60s and the HTTP client allows 10s more. If your client kills tools at 60s, pass `timeout_seconds` at least 10 under that deadline.
 6. A mention does not start a stopped CLI. Something has to be in `fleet_wait_for_mentions` or polling `fleet_get_messages`.
 7. `fleet_wait_for_events` returns a `cursor` even on timeout. Send that back as `after_event_id`; it skips events that were not for you.

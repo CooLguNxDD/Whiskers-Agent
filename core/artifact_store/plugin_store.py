@@ -33,6 +33,10 @@ class ArtifactStore:
         """Download an object's bytes off the event loop."""
         return await asyncio.to_thread(minio_client.get_object_bytes, bucket, object_key)
 
+    async def remove_bytes(self, bucket: str, object_key: str) -> None:
+        """Delete an object off the event loop."""
+        await asyncio.to_thread(minio_client.remove_object, bucket, object_key)
+
     async def presigned_url(
         self, bucket: str, object_key: str, expires_seconds: int = 3600
     ) -> str:

@@ -195,10 +195,10 @@ def _expected_embed_dimensions() -> int:
 
 
 def coerce_embedding(vec: list[float], *, expected: int | None = None) -> list[float]:
-    """Force vector length to global EMBED_DIMENSIONS (default 1500).
+    """Force vector length to global ``embedding_dimensions()``.
 
     Local servers often ignore the OpenAI ``dimensions`` param (e.g. return 768
-    while EMBED_DIMENSIONS=1500). We always store exactly EMBED_DIMENSIONS:
+    while EMBED_DIMENSIONS is larger). We always store exactly that width:
       - longer  → truncate (Matryoshka-style)
       - shorter → zero-pad
     """
