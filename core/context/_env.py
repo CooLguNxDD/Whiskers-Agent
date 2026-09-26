@@ -3,8 +3,10 @@ Split out of core/context.py (Phase 1 modularity refactor) — no side effects b
 import os
 import inspect
 
-_oauth_env = os.environ.get("OAUTH_ENABLED", "").lower()
-OAUTH_ENABLED = _oauth_env == "true"
+_oauth_env = os.environ.get("OAUTH_ENABLED", "").strip().lower()
+OAUTH_ENABLED = _oauth_env == "true" or (
+    not _oauth_env and not (os.environ.get("USERNAME") and os.environ.get("PASSWORD"))
+)
 
 MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:10000")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "").rstrip("/")

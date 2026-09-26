@@ -27,6 +27,10 @@ class IArtifactStore(Protocol):
         """Download an object's bytes from ``bucket``/``object_key``."""
         ...
 
+    async def remove_bytes(self, bucket: str, object_key: str) -> None:
+        """Delete an object at ``bucket``/``object_key``."""
+        ...
+
     async def presigned_url(
         self, bucket: str, object_key: str, expires_seconds: int = 3600
     ) -> str:

@@ -126,7 +126,8 @@ GET /oauth/plugin/{provider}/callback    → handle_callback()
       "token_url": "${WHISKERS_API_URL}/api/v1/oauth/token",
       "client_id": "${WHISKERS_OAUTH_CLIENT_ID}",
       "scopes": ["ALL"],
-      "pkce": "S256-hex"  // "S256" = RFC base64url; "S256-hex" = Whiskers Agent hex variant
+      "pkce": "S256-hex",  // "S256" = RFC base64url; "S256-hex" = Whiskers Agent hex variant
+      "resource": "https://mcp.example.com/mcp"  // RFC 8707; required for MCP resource servers (Atlassian v2)
     }
   },
   "required_credentials": ["WHISKERS_CLIENT_SECRET"]
@@ -141,7 +142,7 @@ GET /oauth/plugin/{provider}/authorize
 
 GET /oauth/plugin/{provider}/callback?code=...&state=...
   → SELECT+decrypt verifier FROM plugin_oauth_pkce_state
-  → POST token_url (code, verifier, client_id, client_secret)
+  → POST token_url (code, verifier, client_id, client_secret, resource if configured)
   → UPSERT encrypted tokens INTO plugin_oauth_tokens
 ```
 
@@ -266,6 +267,7 @@ No changes to `oauth_routes.py` — relay handles all plugins via `plugin_id` qu
 | `401` on `/oauth/plugin/` routes | `PublicPathMiddleware` not mounted | Check middleware order in `whiskers_mcp.py` |
 | `pgp_sym_decrypt` error | `MASTER_KEY` mismatch | Ensure same key used to encrypt and decrypt |
 | Layer 2 token `None` after callback | Callback URL mismatch | Check `MCP_SERVER_URL` matches registered OAuth app |
+| Token stored but upstream MCP `401` | Missing RFC 8707 `resource` on authorize/token | Set `external_oauth.<provider>.resource` to the canonical MCP URL (proxies stamp `proxy.url`); re-run Connect OAuth |
 | `S256-hex` vs `S256` mismatch | Wrong PKCE variant | Use `"S256-hex"` for Whiskers Agent backends; `"S256"` for standard |
 | `RevokedTokenError` | JTI blacklisted | Client must re-authorize |
 | OAuth disabled despite `OAUTH_ENABLED=true` | `DATABASE_URL` not set | Both layers require DB |

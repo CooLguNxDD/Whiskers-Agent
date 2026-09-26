@@ -45,6 +45,7 @@ from utils.error_response import safe_error_response
 from core.context import http_route_registry
 from core.http_route_registry import AuthPolicy
 from core.context import mcp
+from core.embedding_dimensions import embedding_dimensions
 from db_layer import config_store
 
 logger = logging.getLogger("whiskers")
@@ -71,7 +72,7 @@ def _env_defaults() -> dict:
         "embed_provider": os.environ.get("EMBED_PROVIDER", ""),
         "embed_model": os.environ.get("EMBED_MODEL", ""),
         "embed_base_url": os.environ.get("EMBED_BASE_URL", ""),
-        "embed_dimensions": int(os.environ.get("EMBED_DIMENSIONS", "1536")),
+        "embed_dimensions": embedding_dimensions(),
         "rag_enabled": True,
         "local_llm_enabled": False,
         "local_base_url": os.environ.get("LLM_BASE_URL", ""),

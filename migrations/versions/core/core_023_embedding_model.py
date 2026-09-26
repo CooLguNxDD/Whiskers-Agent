@@ -6,6 +6,8 @@ Create Date: 2026-06-04
 """
 
 import os
+from core.embedding_dimensions import embedding_dimensions
+from core.llm_provider_management import default_embed_for
 from alembic import op
 import sqlalchemy as sa
 
@@ -17,13 +19,8 @@ depends_on = None
 
 def get_default_model_id() -> str:
     provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai")).lower()
-    fallback_models = {
-        "openai": "text-embedding-3-small",
-        "gemini": "gemini-embedding-001",
-        "anthropic": "text-embedding-3-small",
-    }
-    model_name = os.environ.get("EMBED_MODEL", "") or fallback_models.get(provider, "text-embedding-3-small")
-    dims = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
+    model_name = os.environ.get("EMBED_MODEL", "") or default_embed_for(provider)[0]
+    dims = embedding_dimensions()
     return f"{provider}:{model_name}:{dims}"
 
 
@@ -56,7 +53,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = embedding_dimensions()
     default_model_id = get_default_model_id()
 
     # 1. Drop embedding_model from tool_config

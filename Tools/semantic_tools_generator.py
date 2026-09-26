@@ -578,7 +578,8 @@ from sqlalchemy import text
 
 def upgrade(conn) -> None:
     """Create {table} embedding table if it does not exist."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    from core.embedding_dimensions import embedding_dimensions
+    dim = str(embedding_dimensions())
 
     conn.execute(
         text(

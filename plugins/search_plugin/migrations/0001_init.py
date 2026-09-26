@@ -6,14 +6,13 @@ Uses EMBED_DIMENSIONS for VECTOR column width.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
+from core.embedding_dimensions import embedding_dimensions
 
 
 def upgrade(conn) -> None:
     """Create content_vectors (+ tenant seam) if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    dim = embedding_dimensions()
     conn.execute(
         text(
             f"""

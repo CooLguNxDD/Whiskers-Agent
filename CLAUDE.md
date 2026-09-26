@@ -223,11 +223,11 @@ keeps the key and is not externally re-shaped.
 | Plugin loader | `core/plugin_loader/` | Two-pass async discovery, toposort deps, hot-swap, event-bus lifecycle (`tools.enable`, `routes.contribute`, …), content-hash staleness, skills/poll_specs/scopes/config registries. `types.py` holds `IPlugin`/`IPluginContext` (`typing.Protocol`) + `PluginManifest` (`TypedDict`) — no runtime imports of sibling loader modules, mirrors `core/interfaces/`'s convention. `Plugin.on_ready` (`plugin.py`) reads `ctx._registry` directly rather than the global `get_registry()` singleton, which is what keeps `plugin.py` free of any import on `plugin_registry.py` (a real `plugin_registry` → `plugin` → `plugin_registry` cycle would otherwise fire, since `plugin_registry.py` imports the concrete `Plugin` class at module level for the re-export every `plugin_config.py` relies on). `plugin_lifecycle_registry.py` types `register_plugin`/`_plugins`/`_plugin_id_map` against `IPlugin` instead of the concrete class. `test_plugin_loader_import_cycles.py` AST-scans the package for module-level cycles on every run. |
 | Scope management | `core/scope_management/` | `ScopeManager`, ordered rules (incl. `plugin_gate_ceiling`), `PrincipalKind`, sentinels `all`/`*`, policy `enforce|audit|off`, three-level grammar (`grammar.py`), plugin gates (`gates.py`/`gate_overlay.py`), legacy-token compat (`legacy_map.py`), C01–C20 contracts. |
 | Route registry / catalog | `core/route_registry/` | `OperationDescriptor` + `OperationCatalog` (revision/etag, scope-aware filter), host HTTP mirror, `execute.py` (jsonschema-validated), OpenAPI export. |
-| Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). |
+| Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). OAuth proxies inject tokens via `RelayAuth` (`httpx2.Auth` — FastMCP 4 / MCP SDK v2 reject `httpx.Auth` as `Invalid "auth" argument`, which `ProxyProvider.list_tools` then mounts as 0 namespaced tools). `create_proxy(..., provider_error_strategy="raise")` so a connect failure cannot look like a successful empty catalog. Layer-2 proxy OAuth sends RFC 8707 `resource` (canonical MCP URL) on authorize, token, and refresh — Atlassian `/v2/mcp` 401s tokens issued without it. |
 | Auth | `oauth/`, `core/api_key_management/`, `core/user_management/` | Layer 1 inbound RS256 JWT + PKCE; Layer 2 per-plugin external OAuth relay; pgcrypto API keys (`[]`=deny-all, `["all"]`=bypass). `core/auth_service.py::get_auth_service()` is the plugin-facing boundary (`IAuthService`) — `principal_from_bearer`/`principal_from_session_cookie`/`mint_scoped_token` wrap `core.context._oauth_svc` + `core.api_key_management.store` so plugins never touch `oauth_provider._svc` or `OAuthService._mint_jwt` directly; mounted on `PluginContext.auth_service`. |
 | Memory | `core/memory/` | Tenant-scoped namespaces; backends `memory` → `memory_content_vectors`, `search` → `search_content_vectors`. `memory_plugin` is an MCP façade only. |
 | Search engine | `db_layer/embeddings/search_engine.py` | Single choke point: `SearchSpec` + `search()` decides hybrid (dense cosine + `ts_rank_cd` FTS + RRF) vs dense-only per collection. All 6 search paths are thin adapters. |
-| Artifacts | `core/artifact_store/` | MinIO offload, tenant-scoped `short_id` links, session-gated REST, MCP `list/get/fetch_artifact` (GOAP-denylisted). `plugin_store.py::get_artifact_store()` is the plugin-facing boundary (`IArtifactStore`) — wraps `minio_client` + `db_layer.artifact_link_store` behind `put_bytes`/`get_bytes`/`presigned_url`/`create_link`/`link_by_short_id`/`short_id_exists`; mounted on `PluginContext.artifact_store`. Retention: `artifact_sweeper` (see §1) deletes row + object past `scheduled_jobs.artifact_sweep.retention_hours`, bucket-allowlisted. |
+| Artifacts | `core/artifact_store/` | MinIO offload, tenant-scoped `short_id` links, session-gated REST, MCP `list/get/fetch_artifact` (GOAP-denylisted). `plugin_store.py::get_artifact_store()` is the plugin-facing boundary (`IArtifactStore`) — wraps `minio_client` + `db_layer.artifact_link_store` behind `put_bytes`/`get_bytes`/`remove_bytes`/`presigned_url`/`create_link`/`link_by_short_id`/`short_id_exists`; mounted on `PluginContext.artifact_store`. Retention: `artifact_sweeper` (see §1) deletes row + object past `scheduled_jobs.artifact_sweep.retention_hours`, bucket-allowlisted. |
 | Telemetry | `core/telemetry/`, `db_layer/telemetry_store.py`, `db_layer/analytics_store.py` | Event buffer persistence + real-time WS streaming, analytics KPIs. Core **never imports a plugin for a metric**: plugins push live gauges in from their lifecycle hooks via `collector.register_gauge_provider(key, callable)` / `unregister_gauge_provider` (e.g. relay's `session_registry.active_count` in `on_ready`; `api/analytics_routes.py`'s `active_sessions` KPI reads this too — never `plugins.*` directly). `snapshot()` evaluates each provider in its own try/except, so one bad provider can't zero the rest; an unregistered gauge falls back to `0`. **Product axis** (`core_049_telemetry_feature_and_graph_runs`): `tool_call_events.feature` (`'mcp'` default) vs `graph_run_events` (one row per whole graph run, `collector.record_graph_run`) — a tool call dispatched *inside* a run still records to `tool_call_events` with `parent_run_id` and must never be summed as a second graph row (real invocation path: `core_graph/mcp_tool.py::_stream_graph_impl_inner`'s `finally`, not `mode_router._run_root`, which the current stack-selection wiring never reaches for a root-classified request — kept for direct/test callers only). Plugin-owned ask audit: `portfolio_ask_turns` (`plugins/portfolio_plugin/ask/telemetry.py`, mirrors bake's `record_bake_run` dual-write) — overlay content stays ephemeral, only question/intent/outcome persist. Visitor-controlled string columns are `VARCHAR` capped (`0008_ask_turn_column_widths`; `create_ask_turn` clips). TTL sweepers (`telemetry_ttl_sweeper`, plugin `ask/ttl_sweeper`) delete at most 5000 rows per tick and return `True` so a backlog drains without one unbounded `DELETE`. A failed collector flush requeues the failed batch *in front* of events that arrived mid-await so `maxlen` drops oldest. |
 | LLM providers | `core/llm_provider_management/` | Dynamic `ProviderSpec` registry — one file per provider, no if/elif dispatch. Adding a provider = new file + one import. |
 | Migrations | `migrations/versions/core/` (Alembic, core only) + `plugins/<pkg>/migrations/` (`NNNN_name.sql|py`, applied by `db_layer/plugin_schema_migrator.py`) | Plugin DDL never uses Alembic branches. |
@@ -249,7 +249,7 @@ agent.py                CLI search + graph execution
 core/                   platform: bootstrap, context, plugin_loader, proxy, proxy_tools,
                         route_registry, scope_management, api_key_management, user_management,
                         memory, artifact_store, telemetry, clustering, llm, llm_provider_management,
-                        dynamic_tools, interfaces
+                        dynamic_tools, interfaces, embedding_dimensions.py
                         (portfolio_plugin/ask/ holds the visitor-ask patch path — see §6)
 core_graph/             LangGraph orchestrator: node/, goap/, subgraphs/ (specialist/ holds the
                         spec+MCP-driven FlowSpec framework: flow_spec.py, flow_registry.py,
@@ -268,7 +268,7 @@ oauth/                  OAuthService (L1), ExternalOAuthRelay (L2), provider + r
 plugins/                portfolio_plugin, job_search_plugin
                         (posting_ingest.py, portfolio_link.py, flow_specs/career_ops_apply_v1.json),
                         search_plugin, memory_plugin, jules_plugin, cat_terminal_relay_plugin,
-                        world_semantic_plugin
+                        world_semantic_plugin, cat_fleet_chat_plugin
 utils/                  response_shape/response_format (11-step pipeline), api_utils, short_id,
                         config_registry, server_config, error_response, minio_client, telemetry,
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
@@ -492,6 +492,36 @@ goals/                  agent goal files / achieve() persistence
   passes this gate, same as every other `evaluate_access` call site.
 - **jules_plugin** — Jules cloud-agent sessions + review fleet; poll_specs drive wait-step injection.
 - **world_semantic_plugin** — Unity hex-world spatial context (index/diff HTTP + MCP query tools).
+- **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
+  (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
+  Tools are tagged `read` / `write` / `wait` so those scope groups are independent.
+  `fleet_wait_for_mentions` and `fleet_wait_for_events` are in
+  `GOAP_CANDIDATE_DENYLIST` (a blocking park must not be a plan step).
+  `agent_name` is self-declared. Hub URL comes from
+  `CAT_FLEET_HUB_URL` (default `http://host.docker.internal:8787` in the
+  container; `http://127.0.0.1:8787` on the host). A non-loopback hub requires
+  `CAT_FLEET_TOKEN`, matched by `CAT_FLEET_HUB_TOKEN` on the plugin. Local hub
+  addresses also require `CAT_ALLOW_LOCAL_PROXIES=1`; public hub connections
+  use the SSRF-safe transport. The HTTP client is opened in `on_load` and closed in `on_unload`.
+  `fleet_set_channel_state` sets the hub's channel lifecycle enum
+  (`active|paused|blocked|review|done|archived`, plugin mirror
+  `CHANNEL_STATES` pinned by a test). Only `archived` changes behavior;
+  `fleet_archive_channel`/`fleet_unarchive_channel` are shorthands for it
+  (read-only channel; open tasks refuse it unless `force` cancels them).
+  **Attachments** (`attachments.py`): the hub stores descriptors only;
+  `fleet_attach_file` uploads bytes via `get_artifact_store().put_bytes` to the
+  manifest's `settings.attachment_bucket` (default `cat-fleet-attachments`,
+  auto-created, key `fleet/<channel>/<uuid>/<name>` or a hash of
+  `client_request_id`+channel+filename+content on retry, cap `attachment_max_bytes`)
+  and posts the descriptor. A failed hub POST deletes the object
+  (`remove_bytes`); an idempotent 200 replay keeps it. Storage failures return
+  `storage_error`, never raw exception text.
+  `fleet_get_attachment` returns a presigned URL (and
+  inline content under `attachment_inline_max_bytes`, checked against downloaded bytes) and **refuses any
+  descriptor outside that bucket/`fleet/` prefix**. Hub rows are caller data,
+  so without the pin a crafted message could presign other buckets
+  (e.g. job-search resumes). `fleet_post_message(attachments=…)` applies the
+  same check. The bucket is deliberately not in the `artifact_sweep` allowlist.
 
 ---
 
@@ -558,6 +588,10 @@ Config in `pyproject.toml` and `requirements-dev.txt`. Pullfrog agent workflows 
 | `DATABASE_URL` | no | `postgresql://mcp:mcp@db:5432/mcp` |
 | `LLM_PROVIDER` | no | `openai` |
 | `OPENAI_API_KEY` | conditional | required when `LLM_PROVIDER=openai` |
+| `EMBED_PROVIDER` | no | inherits `LLM_PROVIDER`; use `openai` for LM Studio's OpenAI-compatible API |
+| `EMBED_MODEL` | no | provider default; Qwen3 Embedding 0.6B is `text-embedding-qwen3-embedding-0.6b` |
+| `EMBED_DIMENSIONS` | no | provider default; Qwen3 Embedding 0.6B uses `1024` |
+| `EMBED_BASE_URL` | no | OpenAI-compatible embedding endpoint, e.g. `http://host.docker.internal:1234/v1` from Docker |
 
 API keys, sessions, and keypairs live in Postgres (`api_keys`, `auth_keypairs`, `oauth_tokens`),
 encrypted under `MASTER_KEY` via pgcrypto.
@@ -568,6 +602,10 @@ encrypted under `MASTER_KEY` via pgcrypto.
   renaming produces a fresh empty DB that looks like "keys vanished".
 - `MASTER_KEY` must be byte-identical across restarts/deploys. Drift silently breaks decrypt in
   `_load_private_key`; `phase_keypair_guard` (`core/bootstrap/`) fails the container loudly at boot.
+- For LM Studio embeddings, load Qwen3 Embedding 0.6B, enable the local server on port `1234`,
+  and set `EMBED_PROVIDER=openai`, `EMBED_MODEL=text-embedding-qwen3-embedding-0.6b`,
+  `EMBED_DIMENSIONS=1024`, `EMBED_BASE_URL=http://host.docker.internal:1234/v1`, and
+  `EMBED_PROFILE=lmstudio` in the local `.env`.
 - Revoke (`POST /api/auth/api-keys/{key_id}/revoke`) rotates: revokes and returns a fresh replacement token.
 - `scripts/reseed.py` without `--full` intentionally leaves `api_keys` / `auth_keypairs` alone.
 

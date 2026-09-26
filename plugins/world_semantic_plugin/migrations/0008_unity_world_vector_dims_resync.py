@@ -1,12 +1,8 @@
-"""Re-type unity_world_vectors.embedding to global EMBED_DIMENSIONS.
+"""Re-type unity_world_vectors.embedding to the live EMBED_DIMENSIONS.
 
-0004 created VECTOR(dim) from env at first migrate. If EMBED_DIMENSIONS later
-matches the real model (e.g. embeddinggemma → 768) but the column still has
-an old fixed size (e.g. 1500), inserts fail with:
-  expected N dimensions, not M
-
-This migration rewrites the column to VECTOR(EMBED_DIMENSIONS) — same source
-as route_embeddings / contact_embeddings / .env_sample embed config.
+0005 already did this once, but plugin migrations are checksum-gated: a later
+EMBED_DIMENSIONS change does not re-run 0005. This step repeats the same
+safe rewrite so a width drift after 0005 still lands on vector({dim}).
 """
 
 from __future__ import annotations

@@ -13,6 +13,8 @@ All Whiskers Agent tools use a **defensive API call wrapper** (`safe_api_call`) 
 
 `utils/api_utils.py` — the sole location for API error handling logic.
 
+The wrapper accepts requests and HTTPX responses. Empty HTTPX error bodies use `reason_phrase` for the fallback message.
+
 ## Core Function: `safe_api_call`
 
 ```python

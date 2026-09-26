@@ -52,6 +52,7 @@ plugins/world_semantic_plugin/migrations/
   0003_index_jobs.py           # durable world_index_jobs queue
   0004_unity_world_vectors.py  # dedicated Unity RAG vectors (not content_vectors)
   0005_unity_world_vector_dims.py  # retype embedding to global EMBED_DIMENSIONS
+  0008_unity_world_vector_dims_resync.py  # same rewrite; 0005 does not re-run after a dim change
 ```
 
 Each step exposes `upgrade(conn)`. With `manifest.json` → `schema.auto_migrate: true`, they apply on plugin load. Confirm rows in `plugin_schema_revisions` for `world_semantic_plugin`.
@@ -133,7 +134,7 @@ Escape hatch (blocking one-shot): `POST /api/world/{id}/index?sync=1` — not fo
 | Rank / search | `query_context` encoder + MCP `search_world_vectors` |
 | Not used | `hexes.embedding` column vectors; not mixed into `content_vectors` |
 
-**Dimension rule:** `EMBED_DIMENSIONS` is the global width for all embed tables (project default **1500**). Migration `0005` retypes `unity_world_vectors.embedding` to `VECTOR(EMBED_DIMENSIONS)`. If the local embed API returns a different width (e.g. 768), the worker pads/truncates to `EMBED_DIMENSIONS` before upsert.
+**Dimension rule:** `EMBED_DIMENSIONS` overrides the embedding provider's default width for all embed tables. Migration `0005` retypes `unity_world_vectors.embedding` to that resolved width. If the local embed API returns a different width, the worker pads/truncates to the resolved width before upsert.
 
 ```sql
 -- after index + embed workers finish

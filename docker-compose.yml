@@ -28,7 +28,7 @@ services:
           memory: 256M
 
   minio:
-    image: minio/minio
+    image: quay.io/minio/minio:latest
     container_name: whiskers-minio
     command: server /data --console-address ":9001"
     ports:

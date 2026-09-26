@@ -39,6 +39,7 @@ from core.proxy.proxy_registration import (  # noqa: E402
     ensure_plugins_row,
     persist_proxy_content_hash,
     upsert_oauth_manifest,
+    upstream_oauth_manifest,
 )
 
 from core.interfaces import IProxyManager
@@ -97,7 +98,11 @@ class ProxyManager(IProxyManager):
             logger.debug(f"Discovery: found WWW-Authenticate: {www_auth}")
             
             # Look for ResourceMetadata="..." or similar parameter
-            match = re.search(r'ResourceMetadata="([^"]+)"', www_auth)
+            match = re.search(
+                r'(?:resource_metadata|ResourceMetadata)="([^"]+)"',
+                www_auth,
+                re.IGNORECASE,
+            )
             if match:
                 rm_url = match.group(1)
                 logger.info(f"Discovery: found protected resource metadata link: {rm_url}")
@@ -511,31 +516,19 @@ class ProxyManager(IProxyManager):
                 except Exception as disc_err:
                     raise ValueError(f"OAuth Autodiscovery failed: {str(disc_err)}")
 
+            from oauth.oauth_relay import canonical_resource_url
+
             oauth_config = {
                 "authorize_url": authorize_url,
                 "token_url": token_url,
                 "client_id": client_id,
                 "scopes": oauth_config.get("scopes", []),
                 "pkce": oauth_config.get("pkce", "S256"),
-                "auth_header": oauth_config.get("auth_header", "Authorization")
+                "auth_header": oauth_config.get("auth_header", "Authorization"),
+                "resource": canonical_resource_url(url),
             }
 
-            manifest = {
-                "name": f"proxy_{name}",
-                "version": "1.0.0",
-                "tier": 1,
-                "external_oauth": {
-                    "upstream": {
-                        "authorize_url": authorize_url,
-                        "token_url": token_url,
-                        "client_id": client_id,
-                        "scopes": oauth_config.get("scopes", []),
-                        "pkce": oauth_config.get("pkce", "S256"),
-                        "redirect_path": "/oauth/plugin/upstream/callback",
-                        "auth_header": oauth_config.get("auth_header", "Authorization")
-                    }
-                }
-            }
+            manifest = upstream_oauth_manifest(name, oauth_config)
             from core.context import oauth_relay
             if oauth_relay:
                 await oauth_relay.upsert_manifest(f"proxy_{name}", manifest)
@@ -746,22 +739,9 @@ class ProxyManager(IProxyManager):
 
             # Register/upsert synthetic manifest if OAuth mode
             if proxy.auth_mode == "oauth" and proxy.oauth_config:
-                manifest = {
-                    "name": f"proxy_{proxy.name}",
-                    "version": "1.0.0",
-                    "tier": 1,
-                    "external_oauth": {
-                        "upstream": {
-                            "authorize_url": proxy.oauth_config.get("authorize_url"),
-                            "token_url": proxy.oauth_config.get("token_url"),
-                            "client_id": proxy.oauth_config.get("client_id"),
-                            "scopes": proxy.oauth_config.get("scopes", []),
-                            "pkce": proxy.oauth_config.get("pkce", "S256"),
-                            "redirect_path": "/oauth/plugin/upstream/callback",
-                            "auth_header": proxy.oauth_config.get("auth_header", "Authorization")
-                        }
-                    }
-                }
+                manifest = upstream_oauth_manifest(
+                    proxy.name, proxy.oauth_config, resource=proxy.url
+                )
                 from core.context import oauth_relay
                 if oauth_relay:
                     await oauth_relay.upsert_manifest(f"proxy_{proxy.name}", manifest)

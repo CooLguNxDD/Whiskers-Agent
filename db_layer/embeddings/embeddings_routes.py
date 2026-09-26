@@ -339,6 +339,9 @@ GOAP_CANDIDATE_DENYLIST: set[tuple[str, str]] = {
     ("GoapAgent", "GoapAgent_step_dispatcher"),
     ("GoapAgent", "GoapAgent_summary_node"),
     ("GoapAgent", "GoapAgent_goap_goal"),
+    # A blocking mention or event wait must not become a GOAP plan step.
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_wait_for_mentions"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_wait_for_events"),
 }
 
 
