@@ -104,12 +104,17 @@ def stable_object_key(
     filename: str,
     data: bytes,
     client_request_id: str,
+    *,
+    author: str,
+    text: str,
+    reply_to: int | None,
 ) -> str:
     """Deterministic ``fleet/{channel}/{hex}/{name}`` for an idempotent attach retry.
 
-    Hash material is request id + channel + sanitized filename + content digest
-    so a same-payload retry overwrites the same object, while a different file
-    under the same request id lands on a new key (hub 409 then delete is safe).
+    Hash material is the whole message payload (request id, channel, author,
+    text, reply_to, sanitized filename, content digest). Only a byte-identical
+    retry reuses a key; any other payload under the same request id lands on a
+    new key, so deleting it after a hub 409 never touches the original's object.
     """
     name = safe_filename(filename)
     digest = hashlib.sha256(
@@ -117,6 +122,9 @@ def stable_object_key(
             (
                 client_request_id.encode("utf-8"),
                 channel.encode("utf-8"),
+                author.encode("utf-8"),
+                text.encode("utf-8"),
+                str(reply_to).encode("utf-8"),
                 name.encode("utf-8"),
                 hashlib.sha256(data).digest(),
             )

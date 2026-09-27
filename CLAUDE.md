@@ -511,10 +511,12 @@ goals/                  agent goal files / achieve() persistence
   **Attachments** (`attachments.py`): the hub stores descriptors only;
   `fleet_attach_file` uploads bytes via `get_artifact_store().put_bytes` to the
   manifest's `settings.attachment_bucket` (default `cat-fleet-attachments`,
-  auto-created, key `fleet/<channel>/<uuid>/<name>` or a hash of
-  `client_request_id`+channel+filename+content on retry, cap `attachment_max_bytes`)
-  and posts the descriptor. A failed hub POST deletes the object
-  (`remove_bytes`); an idempotent 200 replay keeps it. Storage failures return
+  auto-created, key `fleet/<channel>/<uuid>/<name>` or a hash of the whole payload
+  (`client_request_id`+channel+author+text+reply_to+filename+content) on retry, so only a
+  byte-identical retry reuses a key; cap `attachment_max_bytes`) and posts the descriptor.
+  Only a definite hub rejection (4xx, or `unsafe_url` = never sent) deletes the object
+  (`remove_bytes`); a timeout/5xx/raised post keeps it (the hub may have saved the
+  message), and an idempotent 200 replay keeps it. Storage failures return
   `storage_error`, never raw exception text.
   `fleet_get_attachment` returns a presigned URL (and
   inline content under `attachment_inline_max_bytes`, checked against downloaded bytes) and **refuses any

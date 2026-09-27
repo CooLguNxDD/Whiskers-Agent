@@ -188,7 +188,10 @@ async def test_attach_file_reuses_stable_key_for_same_request_id():
     from plugins.cat_fleet_chat_plugin.attachments import stable_object_key
 
     store = _store()
-    expected = stable_object_key("work", "report.md", b"hello fleet", "req-1")
+    expected = stable_object_key(
+        "work", "report.md", b"hello fleet", "req-1",
+        author="codex", text="attached report.md", reply_to=None,
+    )
     with (
         patch(f"{_FILES}.get_artifact_store", return_value=store),
         patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, return_value={"message": {"id": 7}}) as posted,
@@ -207,21 +210,51 @@ async def test_attach_file_reuses_stable_key_for_same_request_id():
 
 
 @pytest.mark.asyncio
-async def test_attach_file_deletes_object_when_hub_post_fails():
+async def test_attach_file_deletes_object_when_hub_rejects():
     store = _store()
     with (
         patch(f"{_FILES}.get_artifact_store", return_value=store),
         patch(
             f"{_TOOLS}.request_json",
             new_callable=AsyncMock,
-            return_value={"status": "error", "error": "api_error", "http_status": 500},
+            return_value={"status": "error", "error": "channel_archived", "http_status": 403},
         ),
     ):
         result = await tools.fleet_attach_file("work", "codex", "a.txt", content_text="hello")
     assert result["status"] == "error"
-    assert result["error"] == "api_error"
     bucket, key, _data, _media = store.put_bytes.await_args.args
     store.remove_bytes.assert_awaited_once_with(bucket, key)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"status": "error", "error": "api_error", "http_status": 500},
+        {"status": "error", "error": "request_failed", "http_status": None},
+    ],
+)
+async def test_attach_file_keeps_object_when_hub_outcome_uncertain(failure):
+    store = _store()
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, return_value=failure),
+    ):
+        result = await tools.fleet_attach_file("work", "codex", "a.txt", content_text="hello")
+    assert result["status"] == "error"
+    store.remove_bytes.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_attach_file_keeps_object_when_hub_post_raises():
+    store = _store()
+    with (
+        patch(f"{_FILES}.get_artifact_store", return_value=store),
+        patch(f"{_TOOLS}.request_json", new_callable=AsyncMock, side_effect=RuntimeError("reset")),
+    ):
+        result = await tools.fleet_attach_file("work", "codex", "a.txt", content_text="hello")
+    assert result["error"] == "api_error"
+    store.remove_bytes.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -241,6 +274,16 @@ async def test_attach_file_deletes_object_on_payload_conflict():
     assert result["http_status"] == 409
     bucket, key, _data, _media = store.put_bytes.await_args.args
     store.remove_bytes.assert_awaited_once_with(bucket, key)
+
+
+def test_stable_key_differs_when_payload_changes_under_same_request_id():
+    from plugins.cat_fleet_chat_plugin.attachments import stable_object_key
+
+    base = dict(author="codex", text="first", reply_to=None)
+    original = stable_object_key("work", "a.txt", b"hello", "req-1", **base)
+    assert stable_object_key("work", "a.txt", b"hello", "req-1", **base) == original
+    for change in ({"text": "second"}, {"reply_to": 3}, {"author": "claude"}):
+        assert stable_object_key("work", "a.txt", b"hello", "req-1", **{**base, **change}) != original
 
 
 @pytest.mark.asyncio

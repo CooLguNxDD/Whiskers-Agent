@@ -337,14 +337,25 @@ async def fleet_attach_file(
     mentions. Returns the hub message; ``attachments[0].id`` is what
     ``fleet_get_attachment`` takes. A retry with the same
     ``client_request_id`` and the same file reuses the object key so the hub
-    can replay the original message. A failed hub post deletes the object.
+    can replay the original message. A definite hub rejection (4xx) deletes
+    the object; an uncertain failure (timeout, 5xx) keeps it, since the hub
+    may already have saved a message that references it.
     """
     if not _CHANNEL_RE.fullmatch(channel or ""):
         return _tool_error("validation_error", "channel must match [a-z0-9][a-z0-9_-]{0,63}")
+    message_text = text or f"attached {files.safe_filename(filename)}"
     try:
         data = files.decode_content(content_text, content_base64)
         object_key = (
-            files.stable_object_key(channel, filename, data, client_request_id)
+            files.stable_object_key(
+                channel,
+                filename,
+                data,
+                client_request_id,
+                author=agent_name,
+                text=message_text,
+                reply_to=reply_to,
+            )
             if client_request_id
             else None
         )
@@ -359,7 +370,7 @@ async def fleet_attach_file(
     body: dict[str, Any] = {
         "channel": channel,
         "author": agent_name,
-        "text": text or f"attached {descriptor['filename']}",
+        "text": message_text,
         "client_request_id": client_request_id,
         "attachments": [descriptor],
     }
@@ -373,12 +384,22 @@ async def fleet_attach_file(
             tool_name="fleet_attach_file",
         )
     except Exception:
-        await files.delete(descriptor)
+        # Outcome unknown: the hub may have saved the message, so keep the object.
         logger.exception("fleet_attach_file: hub post failed")
         return _tool_error("api_error", "hub request failed")
-    if isinstance(result, dict) and result.get("status") == "error":
+    if _hub_rejected(result):
         await files.delete(descriptor)
     return result
+
+
+def _hub_rejected(result: Any) -> bool:
+    """True only when the hub definitely did not save the message (4xx, or never sent)."""
+    if not (isinstance(result, dict) and result.get("status") == "error"):
+        return False
+    if result.get("error") == "unsafe_url":
+        return True
+    status = result.get("http_status")
+    return isinstance(status, int) and 400 <= status < 500
 
 
 @mcp.tool(

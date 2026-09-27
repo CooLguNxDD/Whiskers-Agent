@@ -1,11 +1,43 @@
 """Environment embedding defaults shared by runtime code and migrations."""
 
+import logging
 import os
+
+from sqlalchemy import text
+
+logger = logging.getLogger("whiskers.embedding_dimensions")
 
 
 def embedding_dimensions() -> int:
-    """Resolve the configured width, falling back to the provider's default."""
+    """Resolve the configured width, falling back to the provider's default.
+
+    A missing, non-integer, or nonpositive ``EMBED_DIMENSIONS`` uses the provider default.
+    """
     from core.llm_provider_management import default_embed_for
 
     provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai"))
-    return int(os.environ.get("EMBED_DIMENSIONS", "") or default_embed_for(provider)[1])
+    raw = os.environ.get("EMBED_DIMENSIONS", "").strip()
+    if raw:
+        try:
+            dim = int(raw)
+        except ValueError:
+            dim = 0
+        if dim > 0:
+            return dim
+        logger.warning("EMBED_DIMENSIONS=%r is not a positive integer; using provider default", raw)
+    return int(default_embed_for(provider)[1])
+
+
+def vector_column_width(conn, table: str, column: str = "embedding") -> int | None:
+    """Declared pgvector width of ``table.column`` (sync conn), or None if absent/untyped."""
+    row = conn.execute(
+        text(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = to_regclass(:t) AND attname = :c AND NOT attisdropped"
+        ),
+        {"t": table, "c": column},
+    ).fetchone()
+    # pgvector stores the dimension directly in atttypmod; -1 means unconstrained.
+    if row is None or row[0] is None or row[0] < 1:
+        return None
+    return int(row[0])
