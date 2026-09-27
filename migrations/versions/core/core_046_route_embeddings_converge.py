@@ -8,6 +8,8 @@ Create Date: 2026-07-24
 import os
 from alembic import op
 import sqlalchemy as sa
+from core.embedding_dimensions import embedding_dimensions
+from core.llm_provider_management import default_embed_for
 
 revision = "core_046"
 down_revision = "core_045"
@@ -17,13 +19,8 @@ depends_on = None
 
 def get_default_model_id() -> str:
     provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai")).lower()
-    fallback_models = {
-        "openai": "text-embedding-3-small",
-        "gemini": "gemini-embedding-001",
-        "anthropic": "text-embedding-3-small",
-    }
-    model_name = os.environ.get("EMBED_MODEL", "") or fallback_models.get(provider, "text-embedding-3-small")
-    dims = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
+    model_name = os.environ.get("EMBED_MODEL", "") or default_embed_for(provider)[0]
+    dims = embedding_dimensions()
     return f"{provider}:{model_name}:{dims}"
 
 

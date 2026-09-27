@@ -6,14 +6,13 @@ VECTOR width from EMBED_DIMENSIONS.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
 
 
 def upgrade(conn) -> None:
     """Create world-semantic spatial tables if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    from core.embedding_dimensions import embedding_dimensions
+    dim = embedding_dimensions()
 
     conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 

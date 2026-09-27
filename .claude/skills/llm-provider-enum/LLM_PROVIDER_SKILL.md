@@ -5,6 +5,8 @@ description: 'Thread-safe lazy graph initialization + enum-based LLM provider se
 
 # LLM Provider Registry + Thread-Safe Lazy Init
 
+Embedding migrations and runtime vector stores should call `core.embedding_dimensions.embedding_dimensions()` for the environment width. It uses the provider's registered default and honors an explicit `EMBED_DIMENSIONS` override.
+
 - Prevents concurrent MCP clients from building the expensive LangGraph + LLM instance multiple times
 - Supports multiple LLM providers without if/elif chains and without a hardcoded factory dict —
   each provider is a self-contained module that registers itself

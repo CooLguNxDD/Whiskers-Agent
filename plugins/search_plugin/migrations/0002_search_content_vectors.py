@@ -6,14 +6,13 @@ search table exists for environments that only run plugin migrations.
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
 
 
 def upgrade(conn) -> None:
     """Rename content_vectors if present; create search_content_vectors if missing."""
-    dim = os.environ.get("EMBED_DIMENSIONS", "1536")
+    from core.embedding_dimensions import embedding_dimensions
+    dim = embedding_dimensions()
     exists_old = conn.execute(
         text(
             "SELECT 1 FROM information_schema.tables "

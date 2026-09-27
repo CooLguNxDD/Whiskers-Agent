@@ -2,7 +2,7 @@
 
 import logging
 from typing import Any
-import httpx
+import httpx2
 
 from fastmcp import FastMCP
 from fastmcp.server import create_proxy
@@ -14,10 +14,16 @@ from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 logger = logging.getLogger("whiskers.plugins")
 
 
-class RelayAuth(httpx.Auth):
-    """Custom httpx.Auth that retrieves fresh tokens from the ExternalOAuthRelay.
-    
-    A proxy is not a plugin, but gets a synthetic manifest to reuse ExternalOAuthRelay.
+class RelayAuth(httpx2.Auth):
+    """httpx2.Auth that injects a fresh token from ExternalOAuthRelay.
+
+    FastMCP 4 / MCP SDK v2 construct the upstream client with ``httpx2``.
+    An ``httpx.Auth`` subclass is rejected as ``Invalid "auth" argument``,
+    which FastMCP's ProxyProvider swallows into a list_tools warning and
+    mounts zero namespaced tools.
+
+    A proxy is not a plugin, but gets a synthetic manifest to reuse
+    ExternalOAuthRelay.
     """
     requires_response_body = False
 
@@ -27,7 +33,7 @@ class RelayAuth(httpx.Auth):
         self.provider = provider
         self.auth_header = auth_header or "Authorization"
 
-    async def async_auth_flow(self, request: httpx.Request):
+    async def async_auth_flow(self, request: httpx2.Request):
         """Asynchronous HTTPX auth flow to inject credentials into the request header."""
         from core.context import oauth_relay
         if oauth_relay is None:
@@ -37,6 +43,16 @@ class RelayAuth(httpx.Auth):
 
         try:
             token = await oauth_relay.get_token(self.plugin_id, self.provider)
+            if not token:
+                logger.error(
+                    "RelayAuth: empty token for plugin=%s provider=%s",
+                    self.plugin_id, self.provider,
+                )
+            else:
+                logger.info(
+                    "RelayAuth: attaching token plugin=%s header=%s token_len=%d",
+                    self.plugin_id, self.auth_header, len(token),
+                )
             # Default to Authorization: Bearer <token>
             if self.auth_header.lower() == "authorization":
                 request.headers[self.auth_header] = f"Bearer {token}"
@@ -77,8 +93,12 @@ def build_proxy(
 
     proxy_client = ProxyClient(client_transport, name=name)
 
-    # create_proxy is the non-deprecated replacement for FastMCP.as_proxy()
-    proxy_server = create_proxy(proxy_client, name=name)
+    # create_proxy is the non-deprecated replacement for FastMCP.as_proxy().
+    # Raise on upstream list_tools failure so discovery cannot "succeed" with
+    # 0 tools (FastMCPProxy defaults to provider_error_strategy="warn").
+    proxy_server = create_proxy(
+        proxy_client, name=name, provider_error_strategy="raise"
+    )
 
     provider = FastMCPProvider(proxy_server)
     return provider

@@ -2,6 +2,7 @@
     "tier": "pro",
     "plugins": [
         "plugins.cat_terminal_relay_plugin",
-        "plugins.portfolio_plugin"
+        "plugins.portfolio_plugin",
+        "plugins.cat_fleet_chat_plugin"
     ]
 }

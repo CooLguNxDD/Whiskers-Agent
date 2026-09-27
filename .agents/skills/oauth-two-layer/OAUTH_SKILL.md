@@ -16,7 +16,7 @@ user-invocable: true
 
 | Layer | Direction | Class | Active when |
 |-------|-----------|-------|-------------|
-| **Layer 1** | Inbound (MCP clients → server) | `OAuthService` + `OAuthService_FastMCPProvider` | `OAUTH_ENABLED=true` AND `DATABASE_URL` set |
+| **Layer 1** | Inbound (MCP clients → server) | `OAuthService` + `OAuthService_FastMCPProvider` | OAuth selected (explicit `OAUTH_ENABLED=true`, or no username/password when override is absent) AND `DATABASE_URL` set |
 | **Layer 2** | Outbound (server → external APIs per plugin) | `ExternalOAuthRelay` + `VaultService` | `DATABASE_URL` set AND plugin has `external_oauth` in manifest |
 
 Stdio mode: Layer 1 bypassed; uses `WHISKERS_USERNAME`/`WHISKERS_PASSWORD` directly. No `DATABASE_URL` → OAuth disabled, no legacy fallback.

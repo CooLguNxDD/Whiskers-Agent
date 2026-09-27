@@ -6,15 +6,14 @@ via operation_id=upsert_unity_world_vector (not hexes.embedding).
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import text
 
 
 def upgrade(conn) -> None:
     # Must match global EMBED_DIMENSIONS (same as .env / .env_sample embed block
     # and route/contact vector tables). Do not hardcode a plugin-local size.
-    dim = int(os.environ.get("EMBED_DIMENSIONS", "") or 1536)
+    from core.embedding_dimensions import embedding_dimensions
+    dim = embedding_dimensions()
     if dim < 1:
         dim = 1536
 

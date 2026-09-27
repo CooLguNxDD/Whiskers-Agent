@@ -1,8 +1,11 @@
 """Unit tests for FastMCP composition and proxy setup logic."""
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
+import httpx2
 from core.proxy.compose import build_proxy, mount_proxy, unmount_proxy, RelayAuth
+
+_CREATE_PROXY_KW = {"provider_error_strategy": "raise"}
 
 
 def test_build_proxy_none():
@@ -18,7 +21,9 @@ def test_build_proxy_none():
 
         mock_http.assert_called_once_with(url="http://localhost/api", auth=None)
         mock_client.assert_called_once_with(mock_http.return_value, name="test-none")
-        mock_create_proxy.assert_called_once_with(mock_client.return_value, name="test-none")
+        mock_create_proxy.assert_called_once_with(
+            mock_client.return_value, name="test-none", **_CREATE_PROXY_KW
+        )
         mock_provider.assert_called_once_with(mock_create_proxy.return_value)
         assert res == mock_provider_instance
 
@@ -47,8 +52,31 @@ def test_build_proxy_oauth():
         called_args, called_kwargs = mock_http.call_args
         auth_obj = called_kwargs["auth"]
         assert isinstance(auth_obj, RelayAuth)
+        assert isinstance(auth_obj, httpx2.Auth)
         assert auth_obj.plugin_id == "proxy_test-oauth"
         assert auth_obj.auth_header == "X-Auth-Token"
+
+
+@pytest.mark.asyncio
+async def test_relay_auth_accepted_by_httpx2_client():
+    """FastMCP 4's upstream client is httpx2; httpx.Auth is TypeError there."""
+    auth = RelayAuth(plugin_id="proxy_atlassian", provider="upstream")
+    async with httpx2.AsyncClient(auth=auth) as client:
+        assert client._auth is auth
+
+
+@pytest.mark.asyncio
+async def test_relay_auth_injects_bearer_header():
+    auth = RelayAuth(plugin_id="proxy_atlassian", provider="upstream")
+    request = httpx2.Request("POST", "https://mcp.atlassian.com/v1/mcp")
+    mock_relay = AsyncMock()
+    mock_relay.get_token = AsyncMock(return_value="tok-123")
+    with patch("core.context.oauth_relay", mock_relay):
+        flow = auth.async_auth_flow(request)
+        outgoing = await flow.__anext__()
+        assert outgoing.headers["Authorization"] == "Bearer tok-123"
+        await flow.aclose()
+        mock_relay.get_token.assert_awaited_once_with("proxy_atlassian", "upstream")
 
 
 def test_build_proxy_sse():

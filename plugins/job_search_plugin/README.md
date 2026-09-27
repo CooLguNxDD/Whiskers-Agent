@@ -57,7 +57,7 @@ Restart the server to load it.
 | `MINIO_SECRET_KEY` | Yes | `minioadmin` | MinIO secret key |
 | `MINIO_BUCKET` | No | `job-search-resumes` | PDF bucket |
 | `MINIO_SECURE` | No | `false` | TLS to MinIO |
-| `EMBED_DIMENSIONS` | No | `1536` | Vector dim for the embedding column / migration |
+| `EMBED_DIMENSIONS` | No | Provider default | Vector dim for the embedding column / migration |
 
 ### 3.2 Provider API keys (vault)
 Search/details providers read their keys from the encrypted vault at call time. Missing keys → that provider is **silently skipped** (never raises). Set only the ones you use:

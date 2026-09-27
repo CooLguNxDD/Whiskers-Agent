@@ -6,7 +6,7 @@
 - **Entrypoints**: The backend is orchestrated via `whiskers_agent_mcp.py` (`whiskers_mcp.py` shim) for FastMCP startup/teardown and `agent.py` for CLI search and graph execution.
 - **LangGraph Dynamic Orchestrator (`core_graph/`)**: Implements an extended hybrid GOAP flow: `turn_init` -> `triage` -> `embedder` -> `planner` -> `context_check` (confirm/clarify) -> `step_resolver` -> `permission_gate` -> `builder` -> `executor` -> `validator` -> `step_dispatcher` -> `goap_goal` -> `summary`.
 - **API & Plugins**: Plugins and components dynamically surface capabilities to the system. Plugin discovery is powered by the `/api/plugins` endpoint.
-- **Proxy Infrastructure**: Consolidated proxy infrastructure (`core/proxy/`) handles requests external to the system or third-party resources.
+- **Proxy Infrastructure**: Consolidated proxy infrastructure (`core/proxy/`) handles requests external to the system or third-party resources. OAuth upstreams use `core.proxy.compose.RelayAuth` as `httpx2.Auth` (FastMCP 4); do not subclass `httpx.Auth` or the client raises `Invalid "auth" argument` and the namespace mounts 0 tools. Layer-2 proxy OAuth must send RFC 8707 `resource` (canonical MCP URL) or resource servers such as Atlassian `/v2/mcp` return 401 after a successful token exchange.
 
 ## Architecture Guardrails
 
