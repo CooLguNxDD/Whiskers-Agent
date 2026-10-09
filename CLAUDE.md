@@ -494,6 +494,15 @@ goals/                  agent goal files / achieve() persistence
   passes this gate, same as every other `evaluate_access` call site.
 - **jules_plugin** — Jules cloud-agent sessions + review fleet; poll_specs drive wait-step injection.
 - **world_semantic_plugin** — Unity hex-world spatial context (index/diff HTTP + MCP query tools).
+  Additive multimodal world-hex service: `world_documents.py` validates per-cell inspect/snapshot
+  pairs, `world_index.py` exposes unregistered `index_world` / `search_world` adapters requiring
+  server-issued `AuthorizedWorld`, and `stores/world_hex_store.py` reserves tenant-scoped
+  `world_hex` documents + durable jobs with revision-CAS completion through the existing
+  `embedding_worker` (`upsert_world_hex_multimodal`). Migration `0009_world_vector_spaces.py`
+  removes the global vector-width typmod without deleting legacy rows. Authenticated route/tool
+  assembly remains S04-owned; do not wire these adapters into existing public ingest routes.
+  Payloads, trusted-root/missing-image policy, projection frame and integration details:
+  `plugins/world_semantic_plugin/WORLD_HEX_API.md`.
 - **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
   (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
   Tools are tagged `read` / `write` / `wait` so those scope groups are independent.
