@@ -144,6 +144,18 @@ async def _dense(
         return candidates
 
 
+async def search_by_vector(
+    spec: SearchSpec,
+    vector: list[float],
+    top_k: int,
+    model_id: str,
+    extra_filters: ExtraFilters | None = None,
+    row_filter: RowFilter | None = None,
+) -> list[dict]:
+    """Dense search for an already-embedded text/media query in an explicit model space."""
+    return (await _dense(spec, vector, top_k, model_id, extra_filters, row_filter))[:top_k]
+
+
 async def _sparse(
     spec: SearchSpec,
     query: str,

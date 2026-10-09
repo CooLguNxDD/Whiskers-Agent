@@ -30,6 +30,9 @@ class WorldSemanticPlugin(Plugin):
         from plugins.world_semantic_plugin.routes import register_routes
 
         register_routes()
+        from plugins.world_semantic_plugin.stores.asset_store import register_consumer
+
+        register_consumer()
         logger.info("%s HTTP routes registered", self.name)
 
         # Register + start durable index worker (WorkerRegistry).
@@ -50,6 +53,9 @@ class WorldSemanticPlugin(Plugin):
             logger.exception("%s failed to start world_index_worker", self.name)
 
     async def on_unload(self, ctx: PluginContext) -> None:
+        from plugins.world_semantic_plugin.stores.asset_store import unregister_consumer
+
+        unregister_consumer()
         try:
             from core_graph.worker.worker_registry import get_worker_registry
 
