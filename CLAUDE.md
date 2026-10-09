@@ -231,7 +231,7 @@ keeps the key and is not externally re-shaped.
 | Artifacts | `core/artifact_store/` | MinIO offload, tenant-scoped `short_id` links, session-gated REST, MCP `list/get/fetch_artifact` (GOAP-denylisted). `plugin_store.py::get_artifact_store()` is the plugin-facing boundary (`IArtifactStore`) — wraps `minio_client` + `db_layer.artifact_link_store` behind `put_bytes`/`get_bytes`/`remove_bytes`/`presigned_url`/`create_link`/`link_by_short_id`/`short_id_exists`; mounted on `PluginContext.artifact_store`. Retention: `artifact_sweeper` (see §1) deletes row + object past `scheduled_jobs.artifact_sweep.retention_hours`, bucket-allowlisted. |
 | Telemetry | `core/telemetry/`, `db_layer/telemetry_store.py`, `db_layer/analytics_store.py` | Event buffer persistence + real-time WS streaming, analytics KPIs. Core **never imports a plugin for a metric**: plugins push live gauges in from their lifecycle hooks via `collector.register_gauge_provider(key, callable)` / `unregister_gauge_provider` (e.g. relay's `session_registry.active_count` in `on_ready`; `api/analytics_routes.py`'s `active_sessions` KPI reads this too — never `plugins.*` directly). `snapshot()` evaluates each provider in its own try/except, so one bad provider can't zero the rest; an unregistered gauge falls back to `0`. **Product axis** (`core_049_telemetry_feature_and_graph_runs`): `tool_call_events.feature` (`'mcp'` default) vs `graph_run_events` (one row per whole graph run, `collector.record_graph_run`) — a tool call dispatched *inside* a run still records to `tool_call_events` with `parent_run_id` and must never be summed as a second graph row (real invocation path: `core_graph/mcp_tool.py::_stream_graph_impl_inner`'s `finally`, not `mode_router._run_root`, which the current stack-selection wiring never reaches for a root-classified request — kept for direct/test callers only). Plugin-owned ask audit: `portfolio_ask_turns` (`plugins/portfolio_plugin/ask/telemetry.py`, mirrors bake's `record_bake_run` dual-write) — overlay content stays ephemeral, only question/intent/outcome persist. Visitor-controlled string columns are `VARCHAR` capped (`0008_ask_turn_column_widths`; `create_ask_turn` clips). TTL sweepers (`telemetry_ttl_sweeper`, plugin `ask/ttl_sweeper`) delete at most 5000 rows per tick and return `True` so a backlog drains without one unbounded `DELETE`. A failed collector flush requeues the failed batch *in front* of events that arrived mid-await so `maxlen` drops oldest. |
 | LLM providers | `core/llm_provider_management/` | Dynamic `ProviderSpec` registry — one file per provider, no if/elif dispatch. Adding a provider = new file + one import. |
-| Migrations | `migrations/versions/core/` (Alembic, core only) + `plugins/<pkg>/migrations/` (`NNNN_name.sql|py`, applied by `db_layer/plugin_schema_migrator.py`) | Plugin DDL never uses Alembic branches. Approved world-semantic-v2 exception: `core_051` exclusively owns `world_asset_embeddings`; plugin `0009_require_asset_schema` only guards existence, no duplicate DDL (S03's distinct `0009_world_vector_spaces` coexists; select migrations by full revision id, never sort position). |
+| Migrations | `migrations/versions/core/` (Alembic, core only) + `plugins/<pkg>/migrations/` (`NNNN_name.sql|py`, applied by `db_layer/plugin_schema_migrator.py`) | Plugin DDL never uses Alembic branches. Approved world-semantic-v2 exception: `core_051` exclusively owns `world_asset_embeddings`; plugin `0009_require_asset_schema` only guards existence, no duplicate DDL (S03's distinct `0009_world_vector_spaces` coexists; select migrations by full revision id, never sort position). S04's `0010_world_tenant_owner` adds nullable `worlds.tenant_id` with no backfill. |
 
 ### LLM providers (built-in)
 `openai`, `anthropic`, `gemini` (AI Studio), `gemini-vertex` (Express mode, API-key only),
@@ -508,17 +508,27 @@ goals/                  agent goal files / achieve() persistence
   authenticated adapters live in `asset_adapters.py`. S04 registered `search_assets`, `index_assets`,
   `search_world`, and `index_world` in `manifest.json` (capabilities + read/write scopes) and
   `MCPTools/semantic_tools.py`. Unity-facing self-authenticating HTTP routes are wired in `routes.py`:
-  `POST /api/world/none/{world_id}/assets/{index,search}` and `POST /api/world/none/{world_id}/world/{index,search}`.
-  Authenticated namespace isolation resolves explicit `Principal.tenant_id > 0` through `get_auth_service()`,
-  evaluates scopes (`group:world_semantic_plugin:read` / `write`) via `evaluate_access`, validates world access,
-  loads established projection metadata (`anchor_lat`, `anchor_lng`, `meters_per_degree`, `base_res`), and
-  binds namespaces to `world-hex-v1:[tenant_id, world_id]` while rejecting client-selected filesystem roots
-  and spoofed tenant/world IDs. Exact signatures, root configuration, retry lease, migration ownership and API details:
+  `POST /api/world/none/{world_id}/assets/{index,search}` and `POST /api/world/none/{world_id}/world/{index,search}`
+  only — no `/api/world/none/{world_id}/{index,search}` alias (it shadowed the legacy public spatial
+  `/api/world/{world_id}/index` contract, which stays unchanged and never calls semantic services).
+  Every semantic call resolves an explicit `Principal.tenant_id > 0` through `get_auth_service()` and
+  evaluates scopes (`group:world_semantic_plugin:read` / `write`) via `evaluate_access`. World ops then
+  require **ownership**: `stores.get_world_for_tenant` (`WHERE world_id AND tenant_id = principal tenant`,
+  plugin migration `0010_world_tenant_owner` adds nullable `worlds.tenant_id`, **no backfill** — existing
+  worlds stay unowned until an operator claims them via `assign_world_tenant`/SQL). Foreign, unowned and
+  absent worlds are one indistinguishable not-found (HTTP 404 `world_not_found`, MCP `LookupError`), and
+  no projection/embedding/search/enqueue runs after a denial. The established projection comes from the
+  owned row; hex vectors bind to `world-hex-v1:[tenant_id, world_id]` and search also filters `meta.tenant_id`.
+  Asset `world_id`s are tenant-private library namespaces (rows keyed by tenant), not `worlds` rows.
+  Bodies with `tenant_id`/`trusted_root`, mismatched `world_id` or projection patches are 400; trusted roots
+  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). Exact signatures, root configuration, retry lease, migration ownership and API details:
   [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
   [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
   [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
-  Deterministic mocked E2E test coverage is in `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py`
-  (offline mocked gate runs with `--network none`; live GPU/LLM serving is deferred to the Saturday human smoke test).
+  Offline E2E coverage is in `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py`: registered
+  tools/routes → real services → real `embedding_worker` claim/dispatch/completion, with only the provider
+  and SQL session doubled (search double evaluates the real filter clauses + model space). Runs with
+  `--network none`; live GPU/LLM serving is unverified and deferred to the Saturday human smoke test.
 - **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
   (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
   Tools are tagged `read` / `write` / `wait` so those scope groups are independent.

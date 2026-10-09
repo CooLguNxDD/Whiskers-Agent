@@ -5,6 +5,12 @@ HTTP routes or a Unity bridge, and it does not fetch/render snapshots. S04 owns
 that assembly. Existing public scene-index routes must **not** call it without
 adding authentication and world authorization.
 
+> S04 wiring: the registered surface is `world_adapters.py` (MCP `search_world` /
+> `index_world`, `POST /api/world/none/{world_id}/world/{search,index}`). It
+> authorizes a world only when `worlds.tenant_id` equals the principal tenant
+> (`stores.get_world_for_tenant`, migration `0010_world_tenant_owner`); foreign,
+> unowned and absent worlds are the same not-found. See SETUP_GUIDE.md §9.
+
 ## Server-only authorized context
 
 ```python

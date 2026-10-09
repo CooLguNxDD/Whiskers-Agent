@@ -53,6 +53,9 @@ plugins/world_semantic_plugin/migrations/
   0004_unity_world_vectors.py  # dedicated Unity RAG vectors (not content_vectors)
   0005_unity_world_vector_dims.py  # retype embedding to global EMBED_DIMENSIONS
   0008_unity_world_vector_dims_resync.py  # same rewrite; 0005 does not re-run after a dim change
+  0009_require_asset_schema.py # guard only: requires Alembic core_051 world_asset_embeddings
+  0009_world_vector_spaces.py  # unbounded vector width (per-model spaces), no row rewrite
+  0010_world_tenant_owner.py   # nullable worlds.tenant_id for semantic v2 ownership (no backfill)
 ```
 
 Each step exposes `upgrade(conn)`. With `manifest.json` → `schema.auto_migrate: true`, they apply on plugin load. Confirm rows in `plugin_schema_revisions` for `world_semantic_plugin`.
@@ -302,130 +305,190 @@ Bulk scene data never passes through the LLM context window.
 
 ## 9. Semantic V2 Ingest & Search (S04 Wiring)
 
-### Capabilities & Tools
+Asset-library and world-hex semantic search are exposed as four registered
+operations. They delegate to the S02 asset service (`asset_index.py`,
+`stores/asset_store.py`, [ASSET_API.md](ASSET_API.md)) and the S03 world service
+(`world_index.py`, `stores/world_hex_store.py`, [WORLD_HEX_API.md](WORLD_HEX_API.md));
+there is no second embedding/index pipeline.
 
-Registered in `manifest.json` under capabilities and exported in `MCPTools/`:
+### Registration
 
-| Operation | Access Tag | Required Scope | MCP Tool Signature |
-|---|---|---|---|
-| `search_assets` | `read` | `group:world_semantic_plugin:read` | `search_assets(world_id, query=None, image=None, kind=None, tags=None, k=10)` |
-| `index_assets` | `write` | `group:world_semantic_plugin:write` | `index_assets(world_id, index)` |
-| `search_world` | `read` | `group:world_semantic_plugin:read` | `search_world(world_id, query, k=10)` |
-| `index_world` | `write` | `group:world_semantic_plugin:write` | `index_world(world_id, payload)` |
+| Operation | Tag | Scope (either grants) | MCP signature | HTTP route |
+|---|---|---|---|---|
+| `search_assets` | `read` | `group:world_semantic_plugin:read` / `plugin:world_semantic_plugin` | `search_assets(world_id, query=None, image=None, kind=None, tags=None, k=10)` | `POST /api/world/none/{world_id}/assets/search` |
+| `index_assets` | `write` | `group:world_semantic_plugin:write` / `plugin:world_semantic_plugin` | `index_assets(world_id, index)` | `POST /api/world/none/{world_id}/assets/index` |
+| `search_world` | `read` | `group:world_semantic_plugin:read` / `plugin:world_semantic_plugin` | `search_world(world_id, query, k=10)` | `POST /api/world/none/{world_id}/world/search` |
+| `index_world` | `write` | `group:world_semantic_plugin:write` / `plugin:world_semantic_plugin` | `index_world(world_id, payload)` | `POST /api/world/none/{world_id}/world/index` |
 
-### Unity Bridge HTTP Endpoints
+- Tools: `MCPTools/semantic_tools.py` (imported by `MCPTools/__init__.py`); capabilities in `manifest.json`.
+- Routes: `asset_adapters.register_asset_routes()` + `world_adapters.register_world_routes()`, called from
+  `routes.register_routes()` in the plugin's `on_load`. They are registered with `AuthPolicy.NONE`
+  because each handler **self-authenticates** the bearer; they are never anonymous.
+- These four paths are the only semantic routes. There is **no** `/api/world/none/{world_id}/index` or
+  `/api/world/none/{world_id}/search` alias. The legacy spatial routes (`POST /api/world/{world_id}/index`,
+  `POST …/diff`, `GET …/index/jobs[/{job_id}]`, `GET /api/world/{world_id}`) are unchanged, stay public
+  for the local Unity editor bulk path, and never call the semantic services.
 
-Self-authenticating HTTP bridge routes registered in `routes.py`:
+### Setup prerequisites
 
-| Method | Path | Required Scope | Response |
-|---|---|---|---|
-| `POST` | `/api/world/none/{world_id}/assets/index` | `world_semantic_plugin:write` | `202 Accepted` (`{"status": "enqueued", "enqueued": N, ...}`) or `200 OK` (all indexed) |
-| `POST` | `/api/world/none/{world_id}/assets/search` | `world_semantic_plugin:read` | `200 OK` (`{"status": "ok", "assets": [...]}`) |
-| `POST` | `/api/world/none/{world_id}/world/index` | `world_semantic_plugin:write` | `202 Accepted` (`{"status": "enqueued", ...}`) or `200 OK` |
-| `POST` | `/api/world/none/{world_id}/world/search` | `world_semantic_plugin:read` | `200 OK` (`{"status": "ok", "results": [...]}`) |
+1. **Migrations.** Core Alembic `core_051` (owns `world_asset_embeddings`) must be applied before the
+   plugin loads (`0009_require_asset_schema` fails plugin load otherwise). Plugin migrations
+   `0009_world_vector_spaces` (per-model vector widths) and `0010_world_tenant_owner` (nullable
+   `worlds.tenant_id`) are applied by the plugin migrator (`auto_migrate: true`).
+   ```bash
+   python scripts/migrate.py                         # core Alembic chain incl. core_051
+   python terminal/script/setup.py plugin_migrate    # plugin-local 0001..0010
+   ```
+2. **World ownership.** `0010` adds `worlds.tenant_id` with **no backfill**: every pre-existing world is
+   unowned and answers `404 world_not_found` on the semantic world routes until an operator assigns it.
+   The world row (and its projection) must already exist — created by the legacy spatial index or the
+   Unity editor sync — then claim it once for the tenant (only unowned rows can be claimed; this never
+   reassigns a world):
+   ```sql
+   UPDATE worlds SET tenant_id = 7, updated_at = now() WHERE world_id = 'demo' AND tenant_id IS NULL;
+   ```
+   or in-process `await plugins.world_semantic_plugin.stores.assign_world_tenant("demo", 7)`.
+   Asset libraries do **not** need a `worlds` row: an asset `world_id` is a private library namespace
+   inside the caller's tenant (rows keyed by `(tenant_id, world_id, asset_id)`).
+3. **Model selection (Gemma / LiteLLM).** Both services require a multimodal embedding selection
+   (`gemma-multimodal` provider, configured model alias, explicit positive `dimensions`); text-only
+   providers are rejected, never silently substituted. Serving/adapter contract:
+   [`docs/gemma-multimodal-embedding.md`](../../docs/gemma-multimodal-embedding.md). Either
+   - set the shared profile: `EMBED_PROFILE=gemma_multimodal`, `EMBED_PROVIDER=gemma-multimodal`,
+     `EMBED_MODEL=<LiteLLM alias>`, `EMBED_DIMENSIONS=<verified width>`,
+     `EMBED_BASE_URL=http://host.docker.internal:<port>/v1` (plus `CAT_ALLOW_LOCAL_PROXIES=1` for a
+     local gateway), or
+   - register a `gemma-multimodal` embedding pool entry and map plugin `world_semantic_plugin` tools
+     `asset_semantic` (assets) and `unity_world_semantic` (world hexes) to it in tool config.
 
-Aliases `/api/world/none/{world_id}/index` and `/api/world/none/{world_id}/search` are also supported for backward-compatible client routing.
+   Vectors are stored per model identity `provider:model:dimensions`; changing the model or width
+   starts a separate vector space (re-ingest to populate it) and searches read only the active one.
+4. **Trusted roots (server config only).** Plugin `SETTINGS` (manifest `settings` / runtime config):
+   ```json
+   {
+     "asset_ingestion_roots": {"7": {"library": "WorldGen/AssetLibrary"}},
+     "world_snapshot_roots":  {"7": {"demo": "WorldGen/Snapshots"}}
+   }
+   ```
+   Keys are the verified tenant id (string), then library/world id. Asset `reference.image` /
+   `reference.audio` and a world `snapshot.data.path` are **relative** paths resolved under that root;
+   absolute paths, `..`, symlink escapes and URLs are rejected and nothing is downloaded. Without an
+   asset root `index_assets` fails `400`; without a snapshot root a world envelope must carry inline
+   `snapshot.data.base64` (or omit the snapshot for a text-only hex).
+5. **Queue readiness.** Ingest is asynchronous: both writes stage desired state and a durable
+   `embedding_jobs` row in one transaction. The core `embedding_worker` (WorkerRegistry) claims pending
+   jobs and dispatches `upsert_world_asset_embedding` (consumer registered on plugin load) and
+   `upsert_world_hex_multimodal` to the plugin; completion is generation/revision guarded. Rows become
+   searchable only once indexed/embedded. Failed jobs are retried by re-ingesting.
 
-### Authentication & Namespace Isolation
+### Authentication, tenant and error policy
 
-- **Bearer Token Auth**: All semantic v2 HTTP requests require `Authorization: Bearer <token>`.
-- **Tenant Extraction**: The validated `Principal.tenant_id` must be an integer > 0 (fail-closed if missing). Client request bodies cannot select or override `tenant_id`.
-- **Scope Verification**: Verified through `core.scope_management.evaluate_access` against `group:world_semantic_plugin:read` or `group:world_semantic_plugin:write`.
-- **World Authorization & Projection**: The server verifies that the tenant owns/has access to `world_id` and loads its established projection (`anchor_lat`, `anchor_lng`, `meters_per_degree`, `base_res`).
-- **Namespace Binding**: Bound to `world-hex-v1:[tenant_id, world_id]` in vector stores.
-- **Trusted Root Ingestion**: Asset reference images/audio must be relative paths resolved against server-configured `trusted_root` (via `_trusted_root(tenant, world)`). Client-selected absolute roots or `..` traversals are rejected with `400` / `ValueError`.
+1. Bearer → `get_auth_service().principal_from_bearer` (MCP: the call's access token). No
+   session-cookie, stdio or default-tenant bypass.
+2. `Principal.tenant_id` must be an explicit integer > 0; requests never supply tenant identity.
+3. Scope via `core.scope_management.evaluate_access` (`read` for search, `write` for index).
+4. World operations only: `SELECT … FROM worlds WHERE world_id = :w AND tenant_id = :principal_tenant`.
+   A world owned by another tenant, an unowned world and an absent world are the **same**
+   `404 world_not_found` (MCP: `LookupError("world not found")`). The projection comes from that owned
+   row; nothing runs after a denial (no projection, embedding, search, enqueue or write).
+5. Every read/write stays in one tenant/world namespace: assets by `(tenant_id, world_id)` columns,
+   world hexes by namespace `world-hex-v1:[tenant_id,"world_id"]` plus `meta.tenant_id`.
+6. Bodies containing `tenant_id` or `trusted_root`, a `world_id` that differs from the path, a
+   projection patch, or a reference path outside the trusted root are rejected with `400`.
 
-### Multimodal Model Selection (Gemma / LiteLLM)
+| Condition | HTTP | MCP |
+|---|---|---|
+| missing / invalid bearer | `401 {"status":"error","error":"authentication_required"}` | `PermissionError("authentication required")` |
+| no explicit tenant, or scope denied | `403 {"status":"error","error":"scope_or_tenant_denied"}` | `PermissionError` |
+| world not owned by caller (foreign / unowned / absent) | `404 {"status":"error","error":"world_not_found"}` | `LookupError("world not found")` |
+| invalid body / media / path / spoofed identity | `400`, `error` = `invalid_world_input` or `invalid_asset_input` | `ValueError` |
+| body over limit | `413 {"status":"error","error":"payload_too_large"}` | — |
+| provider / store failure | `503`, `error` = `world_service_failed` or `asset_service_failed` | exception |
 
-Model selections are defined in `config/tools_api_config.json`:
-- `plugins.world_semantic_plugin` / `asset_semantic`: Multimodal embedding provider (e.g. Gemma / LiteLLM embeddings) for joint text/image/audio representation.
-- `plugins.world_semantic_plugin` / `world_semantic`: Multimodal embedding provider for hex document inspection and cell snapshots.
+Failures are never reported as a successful empty result.
 
-Embeddings are normalized unit vectors aggregated across modalities (equal-weight mean of text + media).
+### Examples
 
-### Queue Processing & Worker Readiness
-
-1. **Ingest is Asynchronous**: Posting craft-v3 or world inspect/snapshot envelopes stages durable jobs via `stage_assets` or `embed_job_store`.
-2. **Idempotency**: Existing content hashes that have already been indexed are detected via SHA256 checksums, returning immediately with status `indexed` and without duplicating worker jobs.
-3. **Worker Draining**: Background worker (`WorkerRegistry`) drains pending jobs and stores vectors into `world_asset_embeddings` and `world_hex` stores.
-
-### Ingest & Search Examples
-
-#### Asset Ingest (HTTP)
-```http
-POST /api/world/none/demo/assets/index
-Authorization: Bearer <token>
-Content-Type: application/json
-
+#### Asset ingest — `POST /api/world/none/library/assets/index`
+Body is the versioned WorldGen asset index; `reference` paths are relative to
+`asset_ingestion_roots["7"]["library"]`.
+```json
 {
   "version": 1,
-  "assets": [
-    {
-      "id": "stone_bridge_01",
-      "kind": "prop",
-      "description": "Weathered stone arch bridge over clear water",
-      "tags": ["stone", "bridge", "river"],
-      "craftRoles": ["bridge"],
-      "bounds": [10.0, 4.0, 5.0],
-      "variants": [{"name": "default", "path": "Assets/bridge.glb", "sha256": "abcdef..."}],
-      "defaultVariant": "default",
-      "reference": {"image": "bridge.png", "audio": null}
-    }
-  ]
+  "assets": [{
+    "id": "stone_bridge_01", "kind": "prop",
+    "description": "Weathered stone arch bridge over clear water",
+    "tags": ["stone", "bridge", "river"], "craftRoles": ["crossing"], "bounds": [10.0, 4.0, 5.0],
+    "variants": [{"name": "default", "path": "Assets/bridge.glb",
+                  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+    "defaultVariant": "default",
+    "reference": {"image": "refs/stone_bridge_01.png", "audio": null}
+  }]
 }
 ```
+`202 {"status":"enqueued","enqueued":1,"pending":0,"indexed":0,"warnings":[]}`. An unchanged
+re-ingest after the worker ran returns
+`200 {"status":"indexed","enqueued":0,"pending":0,"indexed":1,"warnings":[]}`.
 
-#### Asset Search (HTTP)
-```http
-POST /api/world/none/demo/assets/search
-Authorization: Bearer <token>
-Content-Type: application/json
+#### Asset search — `POST /api/world/none/library/assets/search`
+```json
+{"query": "stone bridge over a river", "kind": "prop", "tags": ["stone"], "k": 5}
+```
+or by image: `{"image": {"mime_type": "image/png", "data": "<base64 PNG/JPEG bytes>"}, "k": 5}`
+(exactly one of `query` / `image`). Response:
+`200 {"status":"ok","assets":[{"asset_id":"stone_bridge_01","metadata":{…},"score":0.83}]}`.
 
+#### World ingest — `POST /api/world/none/demo/world/index`
+One hex per call: the Unity `world_inspect` result plus an optional snapshot, a monotonically
+increasing `revision`, and the snapshot request center as `snapshot_center`. Coordinates are Unity
+`[x, z]` metres in the world's established projection (here `demo`: anchor 12.0 / 25.0,
+111320 m/deg, `base_res` 10). The inspect disc must fit in one H3 cell and `snapshot_center` must
+match it. `hex_id` is optional (derived from `center`); if given it must agree.
+```json
 {
-  "query": "stone bridge over river",
-  "kind": "prop",
-  "tags": ["stone"],
-  "k": 5
+  "world_id": "demo",
+  "revision": 1,
+  "inspect": {"success": true, "message": "world_inspect", "data": {
+    "ok": true, "center": [437.492, 763.275], "radius": 1.0,
+    "histogram": {"grass": 10, "water": 5},
+    "height": {"min": 1.0, "max": 4.0, "avg": 2.5}, "slope": {"0-5": 2},
+    "waterPercent": 30, "waterLevel": 2.0,
+    "propHistogram": {"willow_tree": 2},
+    "waterBodies": [{"id": "serene_lake", "level": 2.0, "flow": [0.0, 0.0]}],
+    "splines": [{"id": "trail", "kind": "footpath", "points": [[437.492, 763.275], [438.492, 764.275]]}]
+  }},
+  "snapshot_center": [437.492, 763.275],
+  "snapshot": {"success": true, "data": {
+    "ok": true, "path": "snapshots/demo/hex.png", "width": 2, "height": 2,
+    "sizeX": 2, "sizeZ": 2, "view": "top"
+  }}
 }
 ```
+`snapshot.data.base64` (PNG/JPEG bytes) may replace `path`. Response:
+`202 {"status":"queued","world_id":"demo","hex_id":"8a6b0a380ae7fff","revision":1,"content_hash":"…","model_id":"gemma-multimodal:<alias>:<dims>","has_image":true}`.
+Re-posting identical content returns `200` with `"unchanged"`; a lower revision returns `"stale"`;
+reusing a revision for different content is `400`.
 
-#### World Ingest (HTTP)
-```http
-POST /api/world/none/demo/world/index
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "version": 1,
-  "documents": [
-    {
-      "hex_id": "8928308280fffff",
-      "revision": 1,
-      "center_evidence": {"pos": [10.0, 0.0, 20.0], "frame": "unity_xz_meters"},
-      "summary": "Forested slope near waterfall",
-      "tags": ["forest", "waterfall"],
-      "snapshot_image": "snapshots/hex_8928308280fffff.png"
-    }
-  ]
-}
+#### World search — `POST /api/world/none/demo/world/search` or MCP
+```json
+{"query": "lake near willow trees", "k": 5}
 ```
-
-#### World Search (MCP)
 ```python
-results = await search_world(
-    world_id="demo",
-    query="forested waterfall slope",
-    k=5
-)
-# Returns: [{"hex_id": "8928308280fffff", "center_pos": [10.0, 20.0], "center_frame": "unity_xz_meters", "summary": "...", "score": 0.88}]
+await search_world(world_id="demo", query="lake near willow trees", k=5)
 ```
+`200 {"status":"ok","world_id":"demo","results":[{"hex_id":"8a6b0a380ae7fff","center_pos":[437.49,763.28],"center_frame":"unity_xz_meters","summary":"…serene_lake…","score":0.81}]}`
+(`center_pos` is the H3 cell centre in Unity XZ metres; MCP returns the `results` list).
 
-### Offline Mocked Tests vs. Saturday Human Smoke Test
+### Offline mocked tests vs. Saturday human smoke test
 
-> [!IMPORTANT]
-> **Verification Status**:
-> - **Offline Mocked Tests**: Fully verified in CI and `verify-opencat.sh` / `test_semantic_v2_e2e.py` with `--network none` and mock provider/DB layers.
-> - **Saturday Human Smoke Test**: Live serving against active GPU/LiteLLM/Gemma models and live Unity Play Mode bridge is planned for the Saturday human smoke test. **Live model serving has NOT yet been verified in automated offline CI.**
+- **Offline (automated):** `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py` (plus the S02/S03
+  suites) run in the server image with `--network none`. They drive the registered tools/routes, the real
+  services, the real `embedding_worker` claim/dispatch/completion and the plugin consumers; only the
+  embedding provider and SQL/session I/O are deterministic doubles. They prove wiring, isolation and
+  error policy — **not** model quality or serving.
+- **Saturday human smoke test (not yet done):** live Gemma multimodal serving behind LiteLLM, real
+  Postgres/pgvector, Unity play-mode ingest, and the goal queries (`search_assets "bridge over a river"`,
+  `search_world "lake near a village"`). Live GPU/model serving has **not** been verified.
 
 ---
 
