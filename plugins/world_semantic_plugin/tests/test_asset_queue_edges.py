@@ -183,12 +183,40 @@ async def test_http_auth_namespace_scope_and_size(monkeypatch):
     assert search.await_count == 1
 
 
-def test_lifecycle_guard_is_not_another_ddl_owner():
+ASSET_GUARD_REVISION = "0009_require_asset_schema"
+WORLD_VECTOR_REVISION = "0009_world_vector_spaces"
+
+
+def _step_by_revision(steps, revision):
+    """Select one migration step by full revision id, never by sort position."""
+    matches = [s for s in steps if s.revision == revision]
+    assert len(matches) == 1, f"expected exactly one {revision}, got {[s.revision for s in steps]}"
+    return matches[0]
+
+
+def _discover_plugin_steps():
     from pathlib import Path
     from db_layer.plugin_schema_migrator import PluginSchemaMigrator
     migrator = PluginSchemaMigrator()
-    step = migrator.discover_steps(Path("plugins/world_semantic_plugin/migrations"))[-1]
-    assert step.revision == "0009_require_asset_schema"
+    return migrator, migrator.discover_steps(Path("plugins/world_semantic_plugin/migrations"))
+
+
+def test_asset_guard_selected_by_identity_when_world_vector_migration_coexists():
+    # Both 0009 files ship together; the world-vector one sorts after the guard, so position is not identity.
+    _, steps = _discover_plugin_steps()
+    revisions = [s.revision for s in steps]
+    assert ASSET_GUARD_REVISION in revisions and WORLD_VECTOR_REVISION in revisions
+    assert len(set(revisions)) == len(revisions)
+    assert revisions.index(ASSET_GUARD_REVISION) < revisions.index(WORLD_VECTOR_REVISION)
+    guard = _step_by_revision(steps, ASSET_GUARD_REVISION)
+    assert guard.path.name == f"{ASSET_GUARD_REVISION}.py"
+    assert _step_by_revision(list(reversed(steps)), ASSET_GUARD_REVISION) is guard
+    assert _step_by_revision(steps, WORLD_VECTOR_REVISION) is not guard
+
+
+def test_lifecycle_guard_is_not_another_ddl_owner():
+    migrator, steps = _discover_plugin_steps()
+    step = _step_by_revision(steps, ASSET_GUARD_REVISION)
     class Connection:
         def __init__(self, exists):
             self.exists, self.sql = exists, []

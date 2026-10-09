@@ -223,6 +223,23 @@ async def process_batch(jobs: list[dict[str, Any]]) -> None:
     if not jobs:
         return
 
+    # Additive producer delegation by BOTH identities; plugin owns byte validation,
+    # selection pinning and revision-CAS persistence. Legacy builders stay unchanged.
+    world_hex_jobs = [j for j in jobs if (
+        j["plugin_id"] == "world_semantic_plugin"
+        and j["operation_id"] == "upsert_world_hex_multimodal"
+    )]
+    if world_hex_jobs:
+        from plugins.world_semantic_plugin.stores.world_hex_store import process_world_hex_jobs
+
+        await process_world_hex_jobs(world_hex_jobs, _mark_failed)
+        jobs = [j for j in jobs if not (
+            j["plugin_id"] == "world_semantic_plugin"
+            and j["operation_id"] == "upsert_world_hex_multimodal"
+        )]
+        if not jobs:
+            return
+
     from core.llm_config_service import resolve_route_embedding
     from db_layer.embeddings.embeddings_core import model_id_for, embed_documents_with
     from db_layer.embeddings.route_document import build_route_document

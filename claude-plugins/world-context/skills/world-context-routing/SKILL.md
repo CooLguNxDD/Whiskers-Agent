@@ -96,6 +96,26 @@ Order is fixed:
 | Multi-agent | `claim_hexes` / `release_hexes` / `renew_lease` + `critique_region` + `/world-critic` |
 | Terrain carve | `world_bridge carve_terrain` (Play Mode + Auto-Wire) |
 
+## Multimodal world-hex service (S03; registration deferred to S04)
+
+`plugins/world_semantic_plugin/world_index.py` provides unregistered Python adapters
+`index_world(payload, *, context, trusted_root=None)` and `search_world(query, k=10, *, context)`.
+Read `plugins/world_semantic_plugin/WORLD_HEX_API.md` before integration. Create the
+server-only `AuthorizedWorld` only after authenticating the principal, checking world
+membership/scopes and loading its established projection; never accept tenant identity
+from a caller body or wire the service into existing public index routes. Inspect discs
+and corresponding snapshot footprints must fit the same H3 cell. Preserve snapshot
+request center separately (legacy result omits it); consume actual PNG/JPEG bytes or
+trusted-root relative files. Omitted snapshot is explicit text-only in the selected
+multimodal space; supplied invalid media fails. Search centers are `[x,z]` Unity meters.
+
+The existing registered embedding worker consumes `upsert_world_hex_multimodal` only
+for `world_semantic_plugin`, with exact configured model/width and revision/hash CAS.
+Tenant-scoped `world_hex` records coexist with legacy object/hex/hex_layer vectors;
+unchanged indexed content enqueues nothing. A monotonic source revision prevents
+stale retries from overwriting newer work. There is no extra background loop or live
+Unity/provider call during ingestion, and no asset ingestion in this service.
+
 ## Out of scope / deferred
 
 - GOAP in-process wrap of the craft loop (CLI agent is the driver).

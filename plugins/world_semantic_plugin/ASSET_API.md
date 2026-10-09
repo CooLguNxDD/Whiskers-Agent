@@ -119,7 +119,9 @@ Empty results are legitimate and deterministic, not fabricated.
 plugin owns ORM/store code in `asset_models.py` / `stores/asset_store.py`.
 `migrations/0009_require_asset_schema.py` is a lifecycle existence guard only,
 with **no duplicate DDL**; plugin loading fails closed until core migration is
-applied. Existing legacy `568ee6fe3f3f` and core heads are preserved. An operator
+applied. S03's `0009_world_vector_spaces.py` shares the `0009` prefix and sorts
+after this guard; both revision ids are distinct, and tooling/tests must select
+the guard by its full revision id, not by discovery position. Existing legacy `568ee6fe3f3f` and core heads are preserved. An operator
 can use the existing `scripts/migrate.py upgrade core_051` (or its normal `heads`
 path) in deployment; no live migration was performed by S02.
 
