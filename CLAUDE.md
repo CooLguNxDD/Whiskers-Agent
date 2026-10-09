@@ -270,7 +270,8 @@ plugins/                portfolio_plugin, job_search_plugin
                         (posting_ingest.py, portfolio_link.py, flow_specs/career_ops_apply_v1.json),
                         search_plugin, memory_plugin, jules_plugin, cat_terminal_relay_plugin,
                         world_semantic_plugin (asset_index.py, asset_models.py, asset_adapters.py,
-                        stores/asset_store.py, ASSET_API.md), cat_fleet_chat_plugin
+                        world_adapters.py, stores/asset_store.py, stores/world_hex_store.py,
+                        MCPTools/semantic_tools.py, ASSET_API.md, WORLD_HEX_API.md), cat_fleet_chat_plugin
 utils/                  response_shape/response_format (11-step pipeline), api_utils, short_id,
                         config_registry, server_config, error_response, minio_client, telemetry,
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
@@ -504,19 +505,20 @@ goals/                  agent goal files / achieve() persistence
   prevent duplicate/stale vectors. Both-reference policy is normalized equal-weight mean of
   unit text+image/text+audio vectors; missing optional files emit explicit warnings, invalid bytes
   fail. Text/image dense search filters tenant/world/model/kind/all-tags before top-k. Thin
-  authenticated adapters live in `asset_adapters.py`; S04 owns their final discovery/route wiring.
-  The public auth `Principal.tenant_id` carries only explicit verified tenant identity (no default).
-  Exact signatures, root configuration, retry lease, migration ownership and S04 seams:
-  [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md).
-  Additive multimodal world-hex service: `world_documents.py` validates per-cell inspect/snapshot
-  pairs, `world_index.py` exposes unregistered `index_world` / `search_world` adapters requiring
-  server-issued `AuthorizedWorld`, and `stores/world_hex_store.py` reserves tenant-scoped
-  `world_hex` documents + durable jobs with revision-CAS completion through the existing
-  `embedding_worker` (`upsert_world_hex_multimodal`). Migration `0009_world_vector_spaces.py`
-  removes the global vector-width typmod without deleting legacy rows. Authenticated route/tool
-  assembly remains S04-owned; do not wire these adapters into existing public ingest routes.
-  Payloads, trusted-root/missing-image policy, projection frame and integration details:
-  `plugins/world_semantic_plugin/WORLD_HEX_API.md`.
+  authenticated adapters live in `asset_adapters.py`. S04 registered `search_assets`, `index_assets`,
+  `search_world`, and `index_world` in `manifest.json` (capabilities + read/write scopes) and
+  `MCPTools/semantic_tools.py`. Unity-facing self-authenticating HTTP routes are wired in `routes.py`:
+  `POST /api/world/none/{world_id}/assets/{index,search}` and `POST /api/world/none/{world_id}/world/{index,search}`.
+  Authenticated namespace isolation resolves explicit `Principal.tenant_id > 0` through `get_auth_service()`,
+  evaluates scopes (`group:world_semantic_plugin:read` / `write`) via `evaluate_access`, validates world access,
+  loads established projection metadata (`anchor_lat`, `anchor_lng`, `meters_per_degree`, `base_res`), and
+  binds namespaces to `world-hex-v1:[tenant_id, world_id]` while rejecting client-selected filesystem roots
+  and spoofed tenant/world IDs. Exact signatures, root configuration, retry lease, migration ownership and API details:
+  [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
+  [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
+  [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
+  Deterministic mocked E2E test coverage is in `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py`
+  (offline mocked gate runs with `--network none`; live GPU/LLM serving is deferred to the Saturday human smoke test).
 - **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
   (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
   Tools are tagged `read` / `write` / `wait` so those scope groups are independent.

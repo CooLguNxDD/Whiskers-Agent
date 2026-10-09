@@ -68,10 +68,17 @@ plugins/world_semantic_plugin/
 ├── manifest.json
 ├── plugin_config.py          # routes + worker start on load
 ├── hexmath.py                # H3 + meters↔lat/lng patch
-├── routes.py                 # POST index (enqueue) / diff / job status
+├── routes.py                 # POST index (enqueue) / diff / job status + semantic v2 routes
+├── asset_adapters.py         # S04 authenticated asset MCP callables & HTTP bridge
+├── world_adapters.py         # S04 authenticated world MCP callables & HTTP bridge
+├── asset_index.py            # craft-v3 ingestion and multimodal asset search
+├── world_index.py            # multimodal world inspect/snapshot ingest & search
+├── world_documents.py        # inspect/snapshot envelope validation & formatting
 ├── worker/index_worker.py    # WorkerRegistry consumer
 ├── stores/world_store.py     # async SQL ingest + queries
 ├── stores/job_store.py       # enqueue / claim / status
+├── stores/asset_store.py     # durable asset embedding staging & storage
+├── stores/world_hex_store.py # durable world hex document & vector storage
 ├── encoder/                  # step 2 grammar + budget
 ├── summarizer.py             # step 3 dirty summaries
 ├── agents/orchestrator.py    # step 5 stage table
@@ -79,7 +86,8 @@ plugins/world_semantic_plugin/
 │   ├── context_tools.py      # query_context, describe_region, …
 │   ├── action_tools.py       # plan_placement
 │   ├── lease_tools.py        # claim/release/renew
-│   └── critic_tools.py       # critique_region
+│   ├── critic_tools.py       # critique_region
+│   └── semantic_tools.py     # S04 search_assets, search_world, index_assets, index_world
 ├── migrations/
 └── SETUP_GUIDE.md            ← this file
 ```
@@ -289,6 +297,135 @@ pytest test/unit/test_world_semantic_hexmath.py \
 ```
 
 Bulk scene data never passes through the LLM context window.
+
+---
+
+## 9. Semantic V2 Ingest & Search (S04 Wiring)
+
+### Capabilities & Tools
+
+Registered in `manifest.json` under capabilities and exported in `MCPTools/`:
+
+| Operation | Access Tag | Required Scope | MCP Tool Signature |
+|---|---|---|---|
+| `search_assets` | `read` | `group:world_semantic_plugin:read` | `search_assets(world_id, query=None, image=None, kind=None, tags=None, k=10)` |
+| `index_assets` | `write` | `group:world_semantic_plugin:write` | `index_assets(world_id, index)` |
+| `search_world` | `read` | `group:world_semantic_plugin:read` | `search_world(world_id, query, k=10)` |
+| `index_world` | `write` | `group:world_semantic_plugin:write` | `index_world(world_id, payload)` |
+
+### Unity Bridge HTTP Endpoints
+
+Self-authenticating HTTP bridge routes registered in `routes.py`:
+
+| Method | Path | Required Scope | Response |
+|---|---|---|---|
+| `POST` | `/api/world/none/{world_id}/assets/index` | `world_semantic_plugin:write` | `202 Accepted` (`{"status": "enqueued", "enqueued": N, ...}`) or `200 OK` (all indexed) |
+| `POST` | `/api/world/none/{world_id}/assets/search` | `world_semantic_plugin:read` | `200 OK` (`{"status": "ok", "assets": [...]}`) |
+| `POST` | `/api/world/none/{world_id}/world/index` | `world_semantic_plugin:write` | `202 Accepted` (`{"status": "enqueued", ...}`) or `200 OK` |
+| `POST` | `/api/world/none/{world_id}/world/search` | `world_semantic_plugin:read` | `200 OK` (`{"status": "ok", "results": [...]}`) |
+
+Aliases `/api/world/none/{world_id}/index` and `/api/world/none/{world_id}/search` are also supported for backward-compatible client routing.
+
+### Authentication & Namespace Isolation
+
+- **Bearer Token Auth**: All semantic v2 HTTP requests require `Authorization: Bearer <token>`.
+- **Tenant Extraction**: The validated `Principal.tenant_id` must be an integer > 0 (fail-closed if missing). Client request bodies cannot select or override `tenant_id`.
+- **Scope Verification**: Verified through `core.scope_management.evaluate_access` against `group:world_semantic_plugin:read` or `group:world_semantic_plugin:write`.
+- **World Authorization & Projection**: The server verifies that the tenant owns/has access to `world_id` and loads its established projection (`anchor_lat`, `anchor_lng`, `meters_per_degree`, `base_res`).
+- **Namespace Binding**: Bound to `world-hex-v1:[tenant_id, world_id]` in vector stores.
+- **Trusted Root Ingestion**: Asset reference images/audio must be relative paths resolved against server-configured `trusted_root` (via `_trusted_root(tenant, world)`). Client-selected absolute roots or `..` traversals are rejected with `400` / `ValueError`.
+
+### Multimodal Model Selection (Gemma / LiteLLM)
+
+Model selections are defined in `config/tools_api_config.json`:
+- `plugins.world_semantic_plugin` / `asset_semantic`: Multimodal embedding provider (e.g. Gemma / LiteLLM embeddings) for joint text/image/audio representation.
+- `plugins.world_semantic_plugin` / `world_semantic`: Multimodal embedding provider for hex document inspection and cell snapshots.
+
+Embeddings are normalized unit vectors aggregated across modalities (equal-weight mean of text + media).
+
+### Queue Processing & Worker Readiness
+
+1. **Ingest is Asynchronous**: Posting craft-v3 or world inspect/snapshot envelopes stages durable jobs via `stage_assets` or `embed_job_store`.
+2. **Idempotency**: Existing content hashes that have already been indexed are detected via SHA256 checksums, returning immediately with status `indexed` and without duplicating worker jobs.
+3. **Worker Draining**: Background worker (`WorkerRegistry`) drains pending jobs and stores vectors into `world_asset_embeddings` and `world_hex` stores.
+
+### Ingest & Search Examples
+
+#### Asset Ingest (HTTP)
+```http
+POST /api/world/none/demo/assets/index
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "version": 1,
+  "assets": [
+    {
+      "id": "stone_bridge_01",
+      "kind": "prop",
+      "description": "Weathered stone arch bridge over clear water",
+      "tags": ["stone", "bridge", "river"],
+      "craftRoles": ["bridge"],
+      "bounds": [10.0, 4.0, 5.0],
+      "variants": [{"name": "default", "path": "Assets/bridge.glb", "sha256": "abcdef..."}],
+      "defaultVariant": "default",
+      "reference": {"image": "bridge.png", "audio": null}
+    }
+  ]
+}
+```
+
+#### Asset Search (HTTP)
+```http
+POST /api/world/none/demo/assets/search
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "query": "stone bridge over river",
+  "kind": "prop",
+  "tags": ["stone"],
+  "k": 5
+}
+```
+
+#### World Ingest (HTTP)
+```http
+POST /api/world/none/demo/world/index
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "version": 1,
+  "documents": [
+    {
+      "hex_id": "8928308280fffff",
+      "revision": 1,
+      "center_evidence": {"pos": [10.0, 0.0, 20.0], "frame": "unity_xz_meters"},
+      "summary": "Forested slope near waterfall",
+      "tags": ["forest", "waterfall"],
+      "snapshot_image": "snapshots/hex_8928308280fffff.png"
+    }
+  ]
+}
+```
+
+#### World Search (MCP)
+```python
+results = await search_world(
+    world_id="demo",
+    query="forested waterfall slope",
+    k=5
+)
+# Returns: [{"hex_id": "8928308280fffff", "center_pos": [10.0, 20.0], "center_frame": "unity_xz_meters", "summary": "...", "score": 0.88}]
+```
+
+### Offline Mocked Tests vs. Saturday Human Smoke Test
+
+> [!IMPORTANT]
+> **Verification Status**:
+> - **Offline Mocked Tests**: Fully verified in CI and `verify-opencat.sh` / `test_semantic_v2_e2e.py` with `--network none` and mock provider/DB layers.
+> - **Saturday Human Smoke Test**: Live serving against active GPU/LiteLLM/Gemma models and live Unity Play Mode bridge is planned for the Saturday human smoke test. **Live model serving has NOT yet been verified in automated offline CI.**
 
 ---
 
