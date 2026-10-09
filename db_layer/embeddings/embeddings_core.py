@@ -16,8 +16,12 @@ Override the output vector size with EMBED_DIMENSIONS.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
+
+from db_layer.embeddings.multimodal import EmbeddingInput
 
 from langchain_core.embeddings import Embeddings
 
@@ -62,40 +66,46 @@ except Exception:
 
 def _make_embeddings() -> Embeddings:
     """Instantiate a LangChain embeddings client from env config."""
-    from core.llm_provider_management import make_embeddings
+    from utils.embedding_config import environment_embedding_selection
+    return _make_embeddings_from(environment_embedding_selection())
 
-    provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai")).lower()
-    default_model, default_dims = _defaults_from_registry(provider)
-    model = os.environ.get("EMBED_MODEL", "") or default_model
-    dimensions = int(os.environ.get("EMBED_DIMENSIONS", "") or default_dims)
 
-    embed_api_key = os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY")
-    base_url = os.environ.get("EMBED_BASE_URL") or os.environ.get("VOYAGE_BASE_URL")
-
-    return make_embeddings(
-        provider_str=provider,
-        model=model,
-        dimensions=dimensions,
-        api_key=embed_api_key,
-        base_url=base_url,
-    )
+def _effective_selection(sel: dict) -> dict:
+    """Resolve construction options; matching profiles supply batching, never change identity."""
+    from utils.embedding_config import EMBEDDING_CONFIG
+    from core.llm_provider_management import get_llm_provider_registry
+    provider = (sel.get("provider") or "openai").lower()
+    model, dims = sel.get("model"), sel.get("dimensions")
+    spec = get_llm_provider_registry().get(provider)
+    if spec and spec.multimodal_embeddings_factory and dims is not None and type(dims) not in (int, str):
+        raise ValueError("multimodal dimensions must be a configured positive integer")
+    if not model or not dims:
+        default_model, default_dims = _defaults_from_registry(provider)
+        model, dims = model or default_model, dims or default_dims
+    options = {}
+    for profile in EMBEDDING_CONFIG.get("models", {}).values():
+        if profile.get("provider") == provider and profile.get("model") == model:
+            options = {k: profile[k] for k in ("batch_size", "max_concurrency", "max_media_bytes", "timeout_seconds") if k in profile}
+            break
+    options.update(sel)
+    options.update({
+        "provider": provider, "model": model, "dimensions": int(dims),
+        "api_key": sel.get("api_key") or os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY"),
+        "base_url": sel.get("base_url") or os.environ.get("EMBED_BASE_URL") or os.environ.get("VOYAGE_BASE_URL"),
+    })
+    return options
 
 
 def _make_embeddings_from(sel: dict) -> Embeddings:
-    """Instantiate an embeddings client from a resolved selection dict."""
-    from core.llm_provider_management import make_embeddings
-
-    provider = (sel.get("provider") or "openai").lower()
-    default_model, default_dims = _defaults_from_registry(provider)
-    model = sel.get("model") or default_model
-    dimensions = int(sel.get("dimensions") or default_dims)
-    return make_embeddings(
-        provider_str=provider,
-        model=model,
-        dimensions=dimensions,
-        api_key=sel.get("api_key") or os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY"),
-        base_url=sel.get("base_url") or os.environ.get("EMBED_BASE_URL") or os.environ.get("VOYAGE_BASE_URL"),
-    )
+    """Instantiate a registry-resolved text or multimodal client from selection data."""
+    from core.llm_provider_management import make_embeddings, get_llm_provider_registry
+    effective = _effective_selection(sel)
+    kwargs = dict(provider_str=effective["provider"], model=effective["model"],
+                  dimensions=effective["dimensions"], api_key=effective["api_key"], base_url=effective["base_url"])
+    spec = get_llm_provider_registry().get(effective["provider"])
+    if spec and spec.multimodal_embeddings_factory:
+        kwargs["options"] = effective
+    return make_embeddings(**kwargs)
 
 
 def _get_embeddings() -> Embeddings:
@@ -165,19 +175,45 @@ _model_clients_lock = asyncio.Lock()
 def model_id_for(sel: dict) -> str:
     """Return the canonical model_id string for a resolved selection: provider:model:dimensions."""
     provider = (sel.get("provider") or "openai").lower()
-    default_model, default_dims = _defaults_from_registry(provider)
-    dims = sel.get("dimensions") or default_dims
-    model = sel.get("model") or default_model
+    model, dims = sel.get("model"), sel.get("dimensions")
+    if not model or not dims:
+        default_model, default_dims = _defaults_from_registry(provider)
+        model, dims = model or default_model, dims or default_dims
     return f"{provider}:{model}:{dims}"
 
 
 async def _get_client_for(sel: dict) -> Embeddings:
     """Get or create the cached embeddings client for a resolved selection."""
-    m_id = model_id_for(sel)
+    effective = _effective_selection(sel)
+    # Vector identity stays provider:model:width; transport cache also separates endpoint,
+    # credentials and batching settings. Only a digest of runtime configuration is retained.
+    key = hashlib.sha256(json.dumps(effective, sort_keys=True).encode()).hexdigest()
     async with _model_clients_lock:
-        if m_id not in _model_clients:
-            _model_clients[m_id] = _make_embeddings_from(sel)
-        return _model_clients[m_id]
+        if key not in _model_clients:
+            if len(_model_clients) >= 32:
+                _model_clients.pop(next(iter(_model_clients)))
+            _model_clients[key] = _make_embeddings_from(effective)
+        return _model_clients[key]
+
+
+async def embed_multimodal_with(sel: dict, inputs: list[EmbeddingInput]) -> list[list[float]]:
+    """Embed typed text/media documents with an explicit registry selection, in input order."""
+    if not inputs:
+        return []
+    from core.llm_provider_management import get_llm_provider_registry
+    spec = get_llm_provider_registry().get((sel.get("provider") or "openai").lower())
+    if spec is None or spec.multimodal_embeddings_factory is None:
+        raise ValueError("Selected embedding provider has no multimodal adapter")
+    client = await _get_client_for(sel)
+    return await client.aembed_multimodal(inputs)
+
+
+async def embed_multimodal(inputs: list[EmbeddingInput]) -> list[list[float]]:
+    """Embed typed documents using the shared active pool/environment/profile resolution."""
+    if not inputs:
+        return []
+    from core.llm_config_service import resolve_embedding
+    return await embed_multimodal_with(await resolve_embedding(), inputs)
 
 
 async def embed_query_with(sel: dict, text: str) -> list[float]:

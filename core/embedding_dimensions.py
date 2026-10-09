@@ -11,9 +11,18 @@ logger = logging.getLogger("whiskers.embedding_dimensions")
 def embedding_dimensions() -> int:
     """Resolve the configured width, falling back to the provider's default.
 
-    A missing, non-integer, or nonpositive ``EMBED_DIMENSIONS`` uses the provider default.
+    Legacy text providers fall back on invalid ``EMBED_DIMENSIONS``. Opt-in
+    multimodal profiles require a configured positive width; none is assumed.
     """
     from core.llm_provider_management import default_embed_for
+
+    from utils.embedding_config import get_active_profile
+    from core.llm_provider_management import get_llm_provider_registry
+    profile = get_active_profile()
+    spec = get_llm_provider_registry().get(profile.get("provider", ""))
+    if spec and spec.multimodal_embeddings_factory is not None:
+        from utils.embedding_config import environment_embedding_selection
+        return int(environment_embedding_selection()["dimensions"])
 
     provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai"))
     raw = os.environ.get("EMBED_DIMENSIONS", "").strip()

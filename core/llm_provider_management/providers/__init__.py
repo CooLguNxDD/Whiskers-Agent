@@ -14,6 +14,7 @@ from core.llm_provider_management.providers import (  # noqa: F401
     gemini,
     gemini_vertex,
     anthropic,
+    gemma_multimodal,
 )
 
-__all__ = ["openai", "anthropic", "gemini", "gemini_vertex", "voyage"]
+__all__ = ["openai", "anthropic", "gemini", "gemini_vertex", "voyage", "gemma_multimodal"]

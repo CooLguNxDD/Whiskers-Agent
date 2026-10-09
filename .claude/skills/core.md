@@ -25,6 +25,7 @@
 ### Async/Await & Non-Blocking Rules
 - **Synchronous Offloading**: Blocking synchronous HTTP requests or operations (e.g., `requests.request`, interactive `rich.prompt.Prompt.ask`) inside `async def` functions must be offloaded to threads using `asyncio.to_thread` and wrapped with `utils.api_utils.safe_api_call` to prevent event loop blocking.
 - **Concurrency & Rate Limits**: Asynchronous operations that hit rate limits (e.g., document embeddings) must use concurrency control mechanisms like `asyncio.Semaphore` (e.g., `asyncio.Semaphore(10)` in `aembed_documents`).
+- **Multimodal Embeddings**: Producers use shared `embeddings_core.embed_multimodal_with` with typed `EmbeddingInput` / `EmbeddingMedia`, never plugin-local clients or binary-to-text fallbacks. The opt-in `gemma-multimodal` registry provider requires configured model/width/endpoint and a compatible LiteLLM content-parts adapter (see `docs/gemma-multimodal-embedding.md`); the existing EmbeddingGemma profile remains text-only. Media validation is offloaded, batches/tasks are bounded, responses require complete unique indexes and finite exact-width vectors, and transport errors are sanitized.
 
 ### Lifecycle Management & Worker Registries
 - **Resource Cleanup**: Explicit database connection shutdown hooks (e.g., `shutdown_checkpointer` for closing LangGraph memory state pools) must be invoked to handle safe connection teardown.

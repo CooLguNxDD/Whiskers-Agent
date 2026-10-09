@@ -117,6 +117,29 @@ Embeddings dispatch (`make_embeddings` / `default_embed_for`) works the same way
 `spec.id` (a raw string, no enum involved). **Implementation lives in `providers/`**, not
 `base.py`. **No silent OpenAI fallback.**
 
+The opt-in `gemma-multimodal` provider uses the additive
+`ProviderSpec.multimodal_embeddings_factory(model, dimensions, api_key, base_url, options)`
+and `embedding_modalities` declaration. `make_embeddings(..., options=...)` dispatches
+through that registry factory; legacy factories keep their original signature.
+No default model/width is registered for this adapter: both must be configured.
+The shared client lives in `db_layer/embeddings/multimodal.py`; producers call
+`embeddings_core.embed_multimodal_with(sel, list[EmbeddingInput])` (or active
+`embed_multimodal`) rather than constructing plugin-local clients. PNG/JPEG/WAV
+are byte-validated, sent as inline media, and never converted to text. Batches
+validate indexed finite vectors and fail whole on malformed responses. Client
+cache fingerprints include endpoint, runtime credential and batching options;
+vector identity remains `provider:model:dimensions`.
+
+`utils.embedding_config.selection_for_profile(name)` selects an explicit profile;
+active multimodal profiles opt into identity/endpoint resolution while existing
+text profiles retain formatting-only behavior. Matching provider/model profiles
+supply batch options for pool selections. The disabled `gemma_multimodal` example
+has null width/endpoint and requires human configuration. The old `gemma` profile
+is `embeddinggemma:300m`, **text-only**. Do not infer multimodal support from an
+OpenAI-compatible endpoint or from the alias name. See
+`docs/gemma-multimodal-embedding.md` for the content-parts adapter v1 wire contract,
+LiteLLM custom/native adapter prerequisites and the unverified serving limitation.
+
 - `providers/openai.py` — OpenAIEmbeddings
 - `providers/gemini.py` — Gemini wrapper (`get_gemini_embeddings_cls` shared with vertex)
 - `providers/gemini_vertex.py` — same wrapper + `isolated_vertex_env`

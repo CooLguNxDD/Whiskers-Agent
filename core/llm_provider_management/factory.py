@@ -96,6 +96,8 @@ def default_embed_for(provider_str: str) -> tuple[str, int]:
         model = spec.default_embed_model or "text-embedding-3-small"
         dims = int(spec.default_embed_dimensions or 1536)
         return model, dims
+    if spec is not None and spec.multimodal_embeddings_factory is not None:
+        raise ValueError("Multimodal embeddings require configured model and dimensions")
     return "text-embedding-3-small", 1536
 
 
@@ -105,6 +107,7 @@ def make_embeddings(
     dimensions: int,
     api_key: str | None = None,
     base_url: str | None = None,
+    *, options: dict | None = None,
 ) -> Embeddings:
     """Instantiate an embeddings client for *provider_str*.
 
@@ -119,6 +122,9 @@ def make_embeddings(
     spec = reg.get(p_str)
     if spec is None:
         raise ValueError(f"Unsupported embedding provider: '{provider_str}'")
+
+    if spec.multimodal_embeddings_factory is not None:
+        return spec.multimodal_embeddings_factory(model, dimensions, api_key, base_url, options or {})
 
     factory = spec.embeddings_factory
     if factory is None:

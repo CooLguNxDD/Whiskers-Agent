@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 ChatFactory = Callable[[str, Optional[str], Optional[str]], "BaseChatModel"]
 # (model, dimensions, api_key, base_url) -> embeddings client
 EmbeddingsFactory = Callable[[str, int, Optional[str], Optional[str]], "Embeddings"]
+# Configurable multimodal factory adds profile batching/transport options.
+MultimodalEmbeddingsFactory = Callable[[str, int, Optional[str], Optional[str], dict], "Embeddings"]
 AvailabilityCheck = Callable[[], bool]
 
 
@@ -25,7 +27,7 @@ AvailabilityCheck = Callable[[], bool]
 class ProviderSpec:
     """Everything the registry needs to construct and describe one provider.
 
-    ``embeddings_factory=None`` means the provider has no embeddings API
+    With neither embeddings factory declared the provider has no embeddings API
     (e.g. ``agy-cli`` / ``grok-cli``). Callers must set ``EMBED_PROVIDER`` to a
     provider that has a factory — there is no silent OpenAI fallback.
     ``anthropic`` / ``claude-cli`` use Voyage AI via their own factory.
@@ -40,3 +42,5 @@ class ProviderSpec:
     chat_factory: Optional[ChatFactory] = None
     embeddings_factory: Optional[EmbeddingsFactory] = None
     is_available: Optional[AvailabilityCheck] = None
+    multimodal_embeddings_factory: Optional[MultimodalEmbeddingsFactory] = None
+    embedding_modalities: tuple[str, ...] = ("text",)
