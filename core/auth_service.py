@@ -20,6 +20,11 @@ from core.interfaces.principal import Principal
 logger = logging.getLogger("whiskers.auth_service")
 
 
+def _explicit_tenant(value: object) -> int | None:
+    """Carry only a positive integer from verified token claims/API-key storage, never default."""
+    return value if type(value) is int and value > 0 else None
+
+
 class AuthServiceUnavailable(RuntimeError):
     """Raised when OAuth/DB is not configured for this deployment."""
 
@@ -45,7 +50,8 @@ class AuthService:
             if not row:
                 return None
             subject = row.get("subject") or f"api-key:{row['key_id']}"
-            return Principal(subject=subject, scopes=frozenset(resolve_api_key_scopes(row)))
+            return Principal(subject=subject, scopes=frozenset(resolve_api_key_scopes(row)),
+                             tenant_id=_explicit_tenant(row.get("tenant_id")))
 
         svc = self._require_svc()
         try:
@@ -60,6 +66,8 @@ class AuthService:
             subject=subject,
             scopes=frozenset(payload.get("scopes") or []),
             role=payload.get("ocat_role"),
+            tenant_id=_explicit_tenant(payload.get("whiskers_tenant") if payload.get("whiskers_tenant") is not None
+                                       else payload.get("ocat_tenant")),
         )
 
     async def principal_from_session_cookie(self, token: str) -> str | None:

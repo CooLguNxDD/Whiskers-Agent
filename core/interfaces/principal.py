@@ -17,3 +17,5 @@ class Principal:
     # Session-user role claim (``ocat_role``) — feeds ScopeGrant.role for admin-bypass
     # evaluation. Always None for an API-key-derived principal.
     role: str | None = None
+    # Explicit verified tenant only; None must never imply a global/default namespace.
+    tenant_id: int | None = None

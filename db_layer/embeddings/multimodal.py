@@ -79,6 +79,12 @@ def _validate_media(media: EmbeddingMedia, max_bytes: int) -> None:
         raise ValueError("unsupported media MIME; use image/png, image/jpeg or audio/wav")
 
 
+def validate_embedding_media(media: EmbeddingMedia, max_bytes: int = 10_000_000) -> None:
+    """Validate actual media bytes without provider I/O; offload decoding in async callers."""
+    _positive_int(max_bytes, "max_media_bytes", 100_000_000)
+    _validate_media(media, max_bytes)
+
+
 def _validate(inputs: list[EmbeddingInput], max_bytes: int) -> None:
     """Preflight every document (types, MIME, decode) without retaining encoded payloads."""
     for document in inputs:
