@@ -226,6 +226,7 @@ keeps the key and is not externally re-shaped.
 | Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). OAuth proxies inject tokens via `RelayAuth` (`httpx2.Auth` — FastMCP 4 / MCP SDK v2 reject `httpx.Auth` as `Invalid "auth" argument`, which `ProxyProvider.list_tools` then mounts as 0 namespaced tools). `create_proxy(..., provider_error_strategy="raise")` so a connect failure cannot look like a successful empty catalog. Layer-2 proxy OAuth sends RFC 8707 `resource` (canonical MCP URL) on authorize, token, and refresh — Atlassian `/v2/mcp` 401s tokens issued without it. |
 | Auth | `oauth/`, `core/api_key_management/`, `core/user_management/` | Layer 1 inbound RS256 JWT + PKCE; Layer 2 per-plugin external OAuth relay; pgcrypto API keys (`[]`=deny-all, `["all"]`=bypass). `core/auth_service.py::get_auth_service()` is the plugin-facing boundary (`IAuthService`) — `principal_from_bearer`/`principal_from_session_cookie`/`mint_scoped_token` wrap `core.context._oauth_svc` + `core.api_key_management.store` so plugins never touch `oauth_provider._svc` or `OAuthService._mint_jwt` directly; mounted on `PluginContext.auth_service`. |
 | Memory | `core/memory/` | Tenant-scoped namespaces; backends `memory` → `memory_content_vectors`, `search` → `search_content_vectors`. `memory_plugin` is an MCP façade only. |
+| Multimodal embeddings | `db_layer/embeddings/multimodal.py`, shared `embeddings_core.py` resolution | Opt-in `gemma-multimodal` provider/profile; typed text + PNG/JPEG/PCM WAV documents, bounded async batches, finite indexed vectors. Requires a compatible LiteLLM content-parts adapter; `embeddinggemma:300m` stays text-only. Model, width and endpoint are configured, not assumed. Serving prerequisites/API: `docs/gemma-multimodal-embedding.md`. |
 | Search engine | `db_layer/embeddings/search_engine.py` | Single choke point: `SearchSpec` + `search()` decides hybrid (dense cosine + `ts_rank_cd` FTS + RRF) vs dense-only per collection. All 6 search paths are thin adapters. |
 | Artifacts | `core/artifact_store/` | MinIO offload, tenant-scoped `short_id` links, session-gated REST, MCP `list/get/fetch_artifact` (GOAP-denylisted). `plugin_store.py::get_artifact_store()` is the plugin-facing boundary (`IArtifactStore`) — wraps `minio_client` + `db_layer.artifact_link_store` behind `put_bytes`/`get_bytes`/`remove_bytes`/`presigned_url`/`create_link`/`link_by_short_id`/`short_id_exists`; mounted on `PluginContext.artifact_store`. Retention: `artifact_sweeper` (see §1) deletes row + object past `scheduled_jobs.artifact_sweep.retention_hours`, bucket-allowlisted. |
 | Telemetry | `core/telemetry/`, `db_layer/telemetry_store.py`, `db_layer/analytics_store.py` | Event buffer persistence + real-time WS streaming, analytics KPIs. Core **never imports a plugin for a metric**: plugins push live gauges in from their lifecycle hooks via `collector.register_gauge_provider(key, callable)` / `unregister_gauge_provider` (e.g. relay's `session_registry.active_count` in `on_ready`; `api/analytics_routes.py`'s `active_sessions` KPI reads this too — never `plugins.*` directly). `snapshot()` evaluates each provider in its own try/except, so one bad provider can't zero the rest; an unregistered gauge falls back to `0`. **Product axis** (`core_049_telemetry_feature_and_graph_runs`): `tool_call_events.feature` (`'mcp'` default) vs `graph_run_events` (one row per whole graph run, `collector.record_graph_run`) — a tool call dispatched *inside* a run still records to `tool_call_events` with `parent_run_id` and must never be summed as a second graph row (real invocation path: `core_graph/mcp_tool.py::_stream_graph_impl_inner`'s `finally`, not `mode_router._run_root`, which the current stack-selection wiring never reaches for a root-classified request — kept for direct/test callers only). Plugin-owned ask audit: `portfolio_ask_turns` (`plugins/portfolio_plugin/ask/telemetry.py`, mirrors bake's `record_bake_run` dual-write) — overlay content stays ephemeral, only question/intent/outcome persist. Visitor-controlled string columns are `VARCHAR` capped (`0008_ask_turn_column_widths`; `create_ask_turn` clips). TTL sweepers (`telemetry_ttl_sweeper`, plugin `ask/ttl_sweeper`) delete at most 5000 rows per tick and return `True` so a backlog drains without one unbounded `DELETE`. A failed collector flush requeues the failed batch *in front* of events that arrived mid-await so `maxlen` drops oldest. |
@@ -258,7 +259,7 @@ core_graph/             LangGraph orchestrator: node/, goap/, subgraphs/ (specia
                         ladder.py, selection.py, manifest_effort.py, defaults/core_roles.json —
                         see §3.3), runtime/, harness/, agent_loop/, goap_agent/, prompts/, worker/,
                         registry/, mcp_tool.py, states.py
-db_layer/               connection, models/, embeddings/, vault, per-domain *_store.py
+db_layer/               connection, models/, embeddings/ (multimodal.py typed media client), vault, per-domain *_store.py
                         (incl. model_role_store.py — model_role_specs DB overrides),
                         plugin_schema_migrator.py
 api/                    REST/WS routes: admin, plugin_routes/, tool, config, playground, api_key,
@@ -274,6 +275,7 @@ utils/                  response_shape/response_format (11-step pipeline), api_u
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
 config/                 server_config.json, plugin_config.json, tools_api_config.json,
                         embedding_config.json (+ *_example.json)
+docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract)
 migrations/             Alembic core chain (versions/core/)
 Tools/                  tools_generator.py, semantic_tools_generator.py, migration_generator.py,
                         openapi_pipeline/ (live OpenAPI / FastAPI / Flask / Express ingest)
@@ -573,7 +575,7 @@ Config in `pyproject.toml` and `requirements-dev.txt`. Pullfrog agent workflows 
 
 ## 8. Tech Stack
 
-- **Core**: Python 3.11, FastMCP, `rich` (terminal TUIs), `jsonschema` (catalog execute validation)
+- **Core**: Python 3.11, FastMCP, `rich` (terminal TUIs), `jsonschema` (catalog execute validation), Pillow (multimodal PNG/JPEG validation)
 - **Orchestration**: LangGraph (Postgres checkpointer), custom GOAP planner
 - **Data**: PostgreSQL + pgvector, SQLAlchemy 2.0 async ORM, Alembic, MinIO (presigned object storage)
 - **Security**: PyJWT (RS256), bcrypt, argon2-cffi, pyotp (TOTP step-up), pgcrypto vault

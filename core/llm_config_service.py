@@ -148,16 +148,8 @@ def _embed_defaults(provider: str) -> tuple[str, int]:
 
 def _env_embedding() -> dict:
     """Return the environment default embedding config."""
-    provider = os.environ.get("EMBED_PROVIDER", os.environ.get("LLM_PROVIDER", "openai")).lower()
-    default_model, default_dims = _embed_defaults(provider)
-    return {
-        "provider": provider,
-        "model": os.environ.get("EMBED_MODEL", "") or default_model,
-        "dimensions": int(os.environ.get("EMBED_DIMENSIONS", "") or default_dims),
-        "api_key": os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY"),
-        "base_url": os.environ.get("EMBED_BASE_URL") or os.environ.get("VOYAGE_BASE_URL"),
-        "source": "env",
-    }
+    from utils.embedding_config import environment_embedding_selection
+    return environment_embedding_selection()
 
 
 async def resolve_embedding() -> dict:
@@ -195,11 +187,14 @@ async def resolve_embedding() -> dict:
             entry = None
         if entry:
             provider = entry["provider"]
-            default_model, default_dims = _embed_defaults(provider)
+            model, dims = entry.get("model"), entry.get("dimensions")
+            if not model or not dims:
+                default_model, default_dims = _embed_defaults(provider)
+                model, dims = model or default_model, dims or default_dims
             return {
                 "provider": provider,
-                "model": entry["model"] or default_model,
-                "dimensions": entry.get("dimensions") or default_dims,
+                "model": model,
+                "dimensions": dims,
                 "api_key": entry.get("api_key"),
                 "base_url": entry.get("base_url"),
                 "source": "pool",
@@ -214,11 +209,14 @@ async def resolve_route_embedding() -> dict:
             entry = await get_active("route")
             if entry:
                 provider = entry["provider"]
-                default_model, default_dims = _embed_defaults(provider)
+                model, dims = entry.get("model"), entry.get("dimensions")
+                if not model or not dims:
+                    default_model, default_dims = _embed_defaults(provider)
+                    model, dims = model or default_model, dims or default_dims
                 return {
                     "provider": provider,
-                    "model": entry["model"] or default_model,
-                    "dimensions": entry.get("dimensions") or default_dims,
+                    "model": model,
+                    "dimensions": dims,
                     "api_key": entry.get("api_key"),
                     "base_url": entry.get("base_url"),
                     "source": "pool",
@@ -263,11 +261,14 @@ async def resolve_tool_embedding(plugin_id: str, tool_name: str) -> dict:
                     row = (await session.execute(stmt)).fetchone()
                     if row:
                         provider = row.provider
-                        default_model, default_dims = _embed_defaults(provider)
+                        model, dims = row.model, row.dimensions
+                        if not model or not dims:
+                            default_model, default_dims = _embed_defaults(provider)
+                            model, dims = model or default_model, dims or default_dims
                         return {
                             "provider": provider,
-                            "model": row.model or default_model,
-                            "dimensions": row.dimensions or default_dims,
+                            "model": model,
+                            "dimensions": dims,
                             "api_key": row.api_key,
                             "base_url": row.base_url,
                             "source": "pool",
@@ -460,7 +461,10 @@ async def config_version() -> str:
         {
             "chat": {k: chat.get(k) for k in ("provider", "model", "base_url")},
             "core": {k: core.get(k) for k in ("provider", "model", "base_url")},
-            "emb": {k: emb.get(k) for k in ("provider", "model", "dimensions", "base_url")},
+            "emb": {k: emb.get(k) for k in (
+                "provider", "model", "dimensions", "base_url", "batch_size",
+                "max_concurrency", "max_media_bytes", "timeout_seconds",
+            )},
             "route": {k: route.get(k) for k in ("provider", "model", "dimensions", "base_url")},
             "tools": tool_configs,
         },
