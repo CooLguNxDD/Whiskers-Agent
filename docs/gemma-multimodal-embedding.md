@@ -134,9 +134,12 @@ and pass Pillow verification **and decoding**; truncated scans and decompression
 bombs fail. WAV must be nonempty uncompressed PCM, have a positive sample rate,
 and contain all declared frames. Compressed WAV, GIF, MP3, URL/path references,
 bytes in the text field, empty/truncated media and oversized media fail explicitly.
-This API validates on use, not at dataclass construction. It validates the whole
-input list before any HTTP call; decode/validation runs in a thread so the event
-loop stays responsive. It does not resample audio or resize images: backend
+This API validates on use, not at dataclass construction. A preflight pass
+validates the whole input list before any HTTP call (or client creation) without
+keeping encoded payloads; base64 encoding then happens one window
+(`batch_size * max_concurrency` documents) at a time and each window's payloads
+are released before the next is encoded. Decode/validation and encoding run in a
+thread so the event loop stays responsive. It does not resample audio or resize images: backend
 constraints beyond the byte cap belong in the adapter and must fail visibly.
 
 Existing async `embed`, `embed_batch`, `embed_query_with`, `embed_documents_with`
@@ -205,8 +208,20 @@ semaphore. Empty input returns `[]` before resolving a model or making HTTP call
 Every in-flight task in a window is awaited even on a provider error. Cache keys
 include endpoint, runtime credential and batching configuration (as a digest);
 vector identity remains `provider:model:dimensions`. There are no automatic
-retries, model fallbacks or worker loops. Transport errors are sanitized to avoid
-leaking gateway bodies, credentials or inline media.
+retries, model fallbacks or worker loops. Each `aembed_multimodal` call opens one
+SSRF-safe client (`core.proxy.ssrf_safety._safe_async_client`, redirects off)
+shared by all of its windows for connection reuse and closed on success, failure
+or cancellation; every request still re-validates the endpoint URL. Concurrent
+calls get independent clients but share the client-wide semaphore.
+
+Failures raise `MultimodalEmbeddingError` (a `ValueError`) with `category` in
+`unsafe_endpoint | timeout | http_status | transport | invalid_json` and `status`
+(HTTP code for `http_status`, else `None`); malformed vectors raise `ValueError`
+and log `invalid_response`. One `whiskers` warning per failed request carries only
+`category`, `status` and `batch_size` — never exception text, tracebacks, endpoint,
+headers, credentials, media or provider bodies. Non-numeric configured dimensions
+fail with the single message `embedding dimensions must be a configured positive
+integer`.
 
 ## Offline verification and limitations
 

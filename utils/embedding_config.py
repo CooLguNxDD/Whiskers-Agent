@@ -57,6 +57,22 @@ def selection_for_profile(name: str) -> dict[str, Any]:
     return {k: profile[k] for k in fields if k in profile}
 
 
+def configured_dimensions(value: Any, *, strict: bool) -> int:
+    """Parse configured vector width; strict (multimodal) also rejects bools, floats and < 1.
+
+    Conversion failures raise one sanitized message instead of Python's int() error text.
+    """
+    if strict and type(value) not in (int, str):
+        raise ValueError("embedding dimensions must be a configured positive integer")
+    try:
+        dims = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("embedding dimensions must be a configured positive integer") from None
+    if strict and dims < 1:
+        raise ValueError("embedding dimensions must be a configured positive integer")
+    return dims
+
+
 def environment_embedding_selection() -> dict[str, Any]:
     """Resolve opt-in multimodal profiles; retain legacy text environment model defaults."""
     from core.llm_provider_management import default_embed_for, get_llm_provider_registry
@@ -74,11 +90,9 @@ def environment_embedding_selection() -> dict[str, Any]:
         default_model, default_dims = default_embed_for(provider)
         model, dims = model or default_model, dims or default_dims
     selected_spec = get_llm_provider_registry().get(provider)
-    if selected_spec and selected_spec.multimodal_embeddings_factory:
-        if type(dims) not in (int, str) or int(dims) < 1:
-            raise ValueError("multimodal dimensions must be a configured positive integer")
+    strict = bool(selected_spec and selected_spec.multimodal_embeddings_factory)
     selection.update({
-        "provider": provider, "model": model, "dimensions": int(dims),
+        "provider": provider, "model": model, "dimensions": configured_dimensions(dims, strict=strict),
         "api_key": os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY"),
         "base_url": os.environ.get("EMBED_BASE_URL") or selection.get("base_url") or os.environ.get("VOYAGE_BASE_URL"),
         "source": "env",

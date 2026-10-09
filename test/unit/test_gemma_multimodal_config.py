@@ -83,3 +83,26 @@ def test_legacy_text_profile_still_only_controls_prefixes(monkeypatch):
     assert selected["model"] == "voyage-4"
     assert selected["dimensions"] == 1024
     assert format_query("lake") == "task: search result | query: lake"
+
+
+_DIMS_ERROR = "^embedding dimensions must be a configured positive integer$"
+
+
+@pytest.mark.parametrize("dims", ["abc", "3.5", "1e3", True, 3.5, -2, [3]])
+def test_nonnumeric_dimensions_raise_consistent_config_error(selection, dims, monkeypatch):
+    from utils.embedding_config import environment_embedding_selection
+    monkeypatch.setattr("core.proxy.ssrf_safety._safe_async_client",
+                        MagicMock(side_effect=AssertionError("must remain lazy")))
+    with pytest.raises(ValueError, match=_DIMS_ERROR):
+        core._effective_selection({**selection, "dimensions": dims})
+    if isinstance(dims, str):
+        for provider in ("gemma-multimodal", "openai"):
+            monkeypatch.setenv("EMBED_PROVIDER", provider)
+            monkeypatch.setenv("EMBED_MODEL", "mm-alias")
+            monkeypatch.setenv("EMBED_DIMENSIONS", dims)
+            with pytest.raises(ValueError, match=_DIMS_ERROR):
+                environment_embedding_selection()
+        # Text providers keep legacy int() parsing but share the sanitized conversion message.
+        with pytest.raises(ValueError, match=_DIMS_ERROR):
+            core._effective_selection({"provider": "openai", "model": "m", "dimensions": dims})
+    assert core._effective_selection({**selection, "dimensions": "3"})["dimensions"] == 3

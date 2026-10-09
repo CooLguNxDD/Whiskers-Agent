@@ -72,13 +72,14 @@ def _make_embeddings() -> Embeddings:
 
 def _effective_selection(sel: dict) -> dict:
     """Resolve construction options; matching profiles supply batching, never change identity."""
-    from utils.embedding_config import EMBEDDING_CONFIG
+    from utils.embedding_config import EMBEDDING_CONFIG, configured_dimensions
     from core.llm_provider_management import get_llm_provider_registry
     provider = (sel.get("provider") or "openai").lower()
     model, dims = sel.get("model"), sel.get("dimensions")
     spec = get_llm_provider_registry().get(provider)
-    if spec and spec.multimodal_embeddings_factory and dims is not None and type(dims) not in (int, str):
-        raise ValueError("multimodal dimensions must be a configured positive integer")
+    strict = bool(spec and spec.multimodal_embeddings_factory)
+    if strict and dims is not None and type(dims) not in (int, str):
+        raise ValueError("embedding dimensions must be a configured positive integer")
     if not model or not dims:
         default_model, default_dims = _defaults_from_registry(provider)
         model, dims = model or default_model, dims or default_dims
@@ -89,7 +90,7 @@ def _effective_selection(sel: dict) -> dict:
             break
     options.update(sel)
     options.update({
-        "provider": provider, "model": model, "dimensions": int(dims),
+        "provider": provider, "model": model, "dimensions": configured_dimensions(dims, strict=strict),
         "api_key": sel.get("api_key") or os.environ.get("EMBED_API_KEY") or os.environ.get("VOYAGE_API_KEY"),
         "base_url": sel.get("base_url") or os.environ.get("EMBED_BASE_URL") or os.environ.get("VOYAGE_BASE_URL"),
     })

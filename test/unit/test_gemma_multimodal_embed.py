@@ -39,10 +39,17 @@ def transport(monkeypatch):
         return response
 
     client.post.side_effect = respond
-    context = MagicMock()
-    context.__aenter__ = AsyncMock(return_value=client)
-    context.__aexit__ = AsyncMock(return_value=None)
-    factory = MagicMock(return_value=context)
+    client.contexts = []
+
+    def open_client(**_kwargs):
+        # A fresh context per client creation so tests can count/inspect enter and exit.
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=client)
+        context.__aexit__ = AsyncMock(return_value=None)
+        client.contexts.append(context)
+        return context
+
+    factory = MagicMock(side_effect=open_client)
     monkeypatch.setattr("core.proxy.ssrf_safety._safe_async_client", factory)
     monkeypatch.setattr("core.proxy.ssrf_safety._is_safe_url", AsyncMock(return_value=True))
     monkeypatch.setattr(core, "_model_clients", {})
@@ -279,3 +286,162 @@ async def test_unsafe_endpoint_and_transport_errors_are_sanitized(selection, tra
         await core.embed_multimodal_with(selection, [EmbeddingInput(text="x")])
     assert "private request" not in str(failure.value)
     assert failure.value.__suppress_context__
+
+
+@pytest.mark.asyncio
+async def test_serialization_is_windowed_released_and_later_invalid_media_precedes_io(
+        selection, transport, monkeypatch):
+    import gc
+    import weakref
+    from db_layer.embeddings import multimodal
+
+    class Window(list):
+        """Weak-referenceable list so the test can observe release of encoded payloads."""
+
+    original, sizes, released = multimodal._serialize, [], []
+
+    def spy(inputs):
+        sizes.append(len(inputs))
+        window = Window(original(inputs))
+        released.append(weakref.ref(window))
+        return window
+
+    monkeypatch.setattr(multimodal, "_serialize", spy)
+    active = peak = 0
+
+    async def respond(_url, *, json, headers):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        gc.collect()
+        # Encoded payloads of every earlier window are gone once a later window is in flight.
+        assert all(ref() is None for ref in released[:-1])
+        await asyncio.sleep(0)
+        active -= 1
+        values = [int(item["content"][0]["text"]) for item in json["input"]]
+        response = MagicMock()
+        response.json.return_value = {"data": [
+            {"index": i, "embedding": [values[i], 0, 0]} for i in reversed(range(len(values)))]}
+        return response
+
+    transport.post.side_effect = respond
+    png = EmbeddingMedia(image_bytes("PNG"), "image/png")
+    docs = [EmbeddingInput(text=str(i), media=png if i % 3 == 0 else None) for i in range(9)]
+    assert await core.embed_multimodal_with(selection, docs) == [[i, 0, 0] for i in range(9)]
+    # batch_size=2 x max_concurrency=2: serialization never sees more than one 4-document window.
+    assert sizes == [4, 4, 1]
+    assert [len(c.kwargs["json"]["input"]) for c in transport.post.call_args_list] == [2, 2, 2, 2, 1]
+    assert peak == 2
+    sent = transport.post.call_args_list[0].kwargs["json"]["input"][0]["content"][1]
+    assert base64.b64decode(sent["image_url"]["url"].split(",", 1)[1]) == png.data
+
+    sizes.clear()
+    transport.post.reset_mock()
+    from core.proxy.ssrf_safety import _safe_async_client
+    _safe_async_client.reset_mock()
+    bad = docs[:8] + [EmbeddingInput(media=EmbeddingMedia(b"\x89PNG truncated", "image/png"))]
+    with pytest.raises(ValueError, match="PNG/JPEG"):
+        await core.embed_multimodal_with(selection, bad)
+    # Third-window media fails preflight: no window encoded, no client opened, no request sent.
+    assert sizes == []
+    _safe_async_client.assert_not_called()
+    transport.post.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_one_safe_client_per_invocation_with_cleanup(selection, transport):
+    import httpx
+    from core.proxy.ssrf_safety import _safe_async_client
+    from db_layer.embeddings.multimodal import MultimodalEmbeddingError
+    docs = [EmbeddingInput(text=str(i)) for i in range(7)]
+
+    await core.embed_multimodal_with(selection, docs)
+    assert transport.post.call_count == 4
+    assert _safe_async_client.call_count == 1
+    _safe_async_client.assert_called_with(timeout=60, follow_redirects=False)
+    transport.contexts[0].__aexit__.assert_awaited_once()
+
+    first, second = await asyncio.gather(
+        core.embed_multimodal_with(selection, docs[:3]), core.embed_multimodal_with(selection, docs[3:]))
+    assert first == [[i + 0.1, 0.2, 0.3] for i in range(2)] + [[0.1, 0.2, 0.3]]
+    assert len(second) == 4
+    assert len(transport.contexts) == 3
+    for context in transport.contexts[1:]:
+        context.__aenter__.assert_awaited_once()
+        context.__aexit__.assert_awaited_once()
+
+    transport.post.side_effect = httpx.ConnectError("connection refused")
+    with pytest.raises(MultimodalEmbeddingError) as failure:
+        await core.embed_multimodal_with(selection, docs)
+    assert failure.value.category == "transport"
+    transport.contexts[-1].__aexit__.assert_awaited_once()
+    # AsyncExitStack calls type(cm).__aexit__(cm, exc_type, exc, tb); the failure reaches the client exit.
+    assert MultimodalEmbeddingError in transport.contexts[-1].__aexit__.await_args.args
+
+    started = asyncio.Event()
+
+    async def hang(_url, *, json, headers):
+        started.set()
+        await asyncio.Event().wait()
+
+    transport.post.side_effect = hang
+    task = asyncio.create_task(core.embed_multimodal_with(selection, docs))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    transport.contexts[-1].__aexit__.assert_awaited_once()
+    assert asyncio.CancelledError in transport.contexts[-1].__aexit__.await_args.args
+
+
+@pytest.mark.asyncio
+async def test_failure_categories_logged_without_secrets(selection, transport, caplog):
+    import logging
+    import httpx
+    from db_layer.embeddings.multimodal import MultimodalEmbeddingError
+    secret = "synthetic-secret-token-0000"
+    configured = {**selection, "api_key": secret, "base_url": "https://secret-host.example.invalid/v1"}
+    request = httpx.Request("POST", "https://secret-host.example.invalid/v1/embeddings")
+
+    def status_failure():
+        response = MagicMock()
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            f"bad {secret}", request=request, response=httpx.Response(503, text=secret, request=request))
+        return response
+
+    def bad_json():
+        response = MagicMock()
+        response.json.side_effect = ValueError(f"not json {secret}")
+        return response
+
+    cases = [
+        (httpx.ReadTimeout(f"timed out {secret}", request=request), "timeout", None),
+        (status_failure(), "http_status", 503),
+        (bad_json(), "invalid_json", None),
+        (RuntimeError(f"echo {secret}"), "transport", None),
+    ]
+    caplog.set_level(logging.WARNING, logger="whiskers")
+    for outcome, category, status in cases:
+        transport.post.side_effect = None
+        if isinstance(outcome, BaseException):
+            transport.post.side_effect = outcome
+        else:
+            transport.post.return_value = outcome
+        with pytest.raises(MultimodalEmbeddingError) as failure:
+            await core.embed_multimodal_with(configured, [EmbeddingInput(text="x")])
+        assert (failure.value.category, failure.value.status) == (category, status)
+        assert "request/response failed" in str(failure.value)
+        assert secret not in str(failure.value)
+        assert failure.value.__suppress_context__
+        assert f"category={category} status={status} batch_size=1" in caplog.text
+
+    malformed = MagicMock()
+    malformed.json.return_value = {"data": [{"index": 0, "embedding": [1, 2]}]}
+    transport.post.side_effect = None
+    transport.post.return_value = malformed
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        await core.embed_multimodal_with(configured, [EmbeddingInput(text="x")])
+    assert "category=invalid_response" in caplog.text
+    for leaked in (secret, "secret-host", "Bearer", "Traceback"):
+        assert leaked not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)

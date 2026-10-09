@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import io
+import logging
 import math
 import warnings
 import wave
@@ -17,6 +19,8 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from langchain_core.embeddings import Embeddings
+
+logger = logging.getLogger("whiskers")
 
 
 @dataclass(frozen=True)
@@ -75,8 +79,8 @@ def _validate_media(media: EmbeddingMedia, max_bytes: int) -> None:
         raise ValueError("unsupported media MIME; use image/png, image/jpeg or audio/wav")
 
 
-def _serialize(inputs: list[EmbeddingInput], max_bytes: int) -> list[dict]:
-    documents = []
+def _validate(inputs: list[EmbeddingInput], max_bytes: int) -> None:
+    """Preflight every document (types, MIME, decode) without retaining encoded payloads."""
     for document in inputs:
         if not isinstance(document, EmbeddingInput):
             raise TypeError("multimodal input must be an EmbeddingInput")
@@ -84,11 +88,18 @@ def _serialize(inputs: list[EmbeddingInput], max_bytes: int) -> list[dict]:
             raise TypeError("embedding text must be a string, never bytes")
         if not (document.text and document.text.strip()) and document.media is None:
             raise ValueError("embedding input requires nonempty text or media")
+        if document.media is not None:
+            _validate_media(document.media, max_bytes)
+
+
+def _serialize(inputs: list[EmbeddingInput]) -> list[dict]:
+    """Encode one already-validated window into content parts (frozen inputs, immutable bytes)."""
+    documents = []
+    for document in inputs:
         parts = []
         if document.text:
             parts.append({"type": "text", "text": document.text})
         if document.media is not None:
-            _validate_media(document.media, max_bytes)
             encoded = base64.b64encode(document.media.data).decode("ascii")
             if document.media.mime_type == "audio/wav":
                 parts.append({"type": "input_audio", "input_audio": {"data": encoded, "format": "wav"}})
@@ -122,6 +133,33 @@ def _vectors(response: object, count: int, dimensions: int) -> list[list[float]]
     return [ordered[i] for i in range(count)]
 
 
+FAILURE_CATEGORIES = frozenset({
+    "unsafe_endpoint", "timeout", "http_status", "transport", "invalid_json", "invalid_response"})
+
+
+class MultimodalEmbeddingError(ValueError):
+    """Sanitized adapter failure; `category` is one of FAILURE_CATEGORIES, `status` an HTTP code or None."""
+
+    def __init__(self, category: str, status: int | None = None) -> None:
+        detail = f"{category}, HTTP {status}" if status is not None else category
+        super().__init__(f"multimodal embedding request/response failed ({detail}); check adapter route")
+        self.category = category
+        self.status = status
+
+
+def _log_failure(category: str, batch_size: int, status: int | None = None) -> None:
+    # Allowlisted metadata only: never exception text, endpoint, headers, media or provider bodies.
+    if category not in FAILURE_CATEGORIES:
+        category = "transport"
+    logger.warning("multimodal embedding failure category=%s status=%s batch_size=%d",
+                   category, status, batch_size)
+
+
+def _failure(category: str, batch_size: int, status: int | None = None) -> MultimodalEmbeddingError:
+    _log_failure(category, batch_size, status)
+    return MultimodalEmbeddingError(category if category in FAILURE_CATEGORIES else "transport", status)
+
+
 class GemmaMultimodalEmbeddings(Embeddings):
     """Async-only client for an explicitly configured LiteLLM multimodal adapter route."""
 
@@ -145,45 +183,73 @@ class GemmaMultimodalEmbeddings(Embeddings):
         self.timeout_seconds = _positive_int(timeout_seconds, "timeout_seconds", 600)
         self._semaphore = asyncio.Semaphore(self.max_concurrency)
 
-    async def _request(self, documents: list[dict]) -> list[list[float]]:
-        from core.proxy.ssrf_safety import _is_safe_url, _safe_async_client
+    async def _request(self, client: object, documents: list[dict]) -> list[list[float]]:
+        import httpx
+        from core.proxy.ssrf_safety import _is_safe_url
+        count = len(documents)
         payload = {"model": self.model, "dimensions": self.dimensions,
                    "encoding_format": "float", "input": documents}
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        endpoint = f"{self.base_url}/embeddings"
+        # Errors below never carry headers, provider bodies, inline media or the endpoint.
         async with self._semaphore:
             try:
-                endpoint = f"{self.base_url}/embeddings"
-                if not await _is_safe_url(endpoint):
-                    raise ValueError("unsafe embedding endpoint")
-                # Re-check and pin DNS at connect time too; redirects stay disabled.
-                async with _safe_async_client(timeout=self.timeout_seconds, follow_redirects=False) as client:
-                    response = await client.post(f"{self.base_url}/embeddings", json=payload, headers=headers)
-                    response.raise_for_status()
-                    body = response.json()
+                safe = await _is_safe_url(endpoint)
             except Exception:
-                # Do not leak headers, provider error bodies, inline media or endpoint credentials.
-                raise ValueError("multimodal embedding request/response failed; check adapter route") from None
-        return _vectors(body, len(documents), self.dimensions)
+                safe = False
+            if not safe:
+                raise _failure("unsafe_endpoint", count)
+            try:
+                # The SSRF transport re-checks and pins DNS at connect time; redirects stay disabled.
+                response = await client.post(endpoint, json=payload, headers=headers)
+                response.raise_for_status()
+            except httpx.TimeoutException:
+                raise _failure("timeout", count) from None
+            except httpx.HTTPStatusError as exc:
+                status = getattr(exc.response, "status_code", None)
+                raise _failure("http_status", count, status if type(status) is int else None) from None
+            except Exception:
+                raise _failure("transport", count) from None
+            try:
+                body = response.json()
+            except Exception:
+                raise _failure("invalid_json", count) from None
+        try:
+            return _vectors(body, count, self.dimensions)
+        except ValueError:
+            _log_failure("invalid_response", count)
+            raise
 
     async def aembed_multimodal(self, inputs: list[EmbeddingInput]) -> list[list[float]]:
-        """Embed complete ordered inputs; bound batch size, tasks and in-flight requests."""
+        """Embed complete ordered inputs; bound batch size, tasks, in-flight requests and encoded media."""
         if not inputs:
             return []
-        # Decode/validate ALL media before any outbound call, off the event loop.
-        documents = await asyncio.to_thread(_serialize, inputs, self.max_media_bytes)
-        vectors = []
+        # Decode/validate ALL media before any outbound call, off the event loop; nothing is kept.
+        await asyncio.to_thread(_validate, inputs, self.max_media_bytes)
+        from core.proxy.ssrf_safety import _safe_async_client
+        vectors: list[list[float]] = []
         window_size = self.batch_size * self.max_concurrency
-        for start in range(0, len(documents), window_size):
-            window = documents[start:start + window_size]
-            results = await asyncio.gather(*(
-                self._request(window[i:i + self.batch_size])
-                for i in range(0, len(window), self.batch_size)
-            ), return_exceptions=True)
-            # Every task in this bounded window is awaited even if one fails.
-            for result in results:
-                if isinstance(result, BaseException):
-                    raise result
-                vectors.extend(result)
+        async with contextlib.AsyncExitStack() as stack:
+            # One SSRF-safe client per invocation: pooled across windows, closed on any exit.
+            try:
+                client = await stack.enter_async_context(
+                    _safe_async_client(timeout=self.timeout_seconds, follow_redirects=False))
+            except Exception:
+                raise _failure("transport", 0) from None
+            for start in range(0, len(inputs), window_size):
+                # Encode only this window; its payloads are released before the next one.
+                documents = await asyncio.to_thread(_serialize, inputs[start:start + window_size])
+                results = await asyncio.gather(*(
+                    self._request(client, documents[i:i + self.batch_size])
+                    for i in range(0, len(documents), self.batch_size)
+                ), return_exceptions=True)
+                del documents
+                # Every task in this bounded window is awaited even if one fails.
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+                    vectors.extend(result)
+                del results
         return vectors
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
