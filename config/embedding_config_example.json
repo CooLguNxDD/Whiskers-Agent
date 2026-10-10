@@ -16,10 +16,27 @@
       "enabled": true,
       "provider": "openai",
       "model": "embeddinggemma:300m",
+      "modalities": ["text"],
       "dimensions": 768,
       "query_prefix": "task: search result | query: {text}",
       "document_prefix": "title: {title} | text: {text}",
       "default_title": "none"
+    },
+    "gemma_multimodal": {
+      "enabled": false,
+      "provider": "gemma-multimodal",
+      "model": "gemma-embedding-2-multimodal",
+      "dimensions": null,
+      "base_url": null,
+      "modalities": ["text", "image/png", "image/jpeg", "audio/wav"],
+      "adapter_protocol": "litellm-content-parts-v1",
+      "batch_size": 8,
+      "max_concurrency": 2,
+      "max_media_bytes": 10000000,
+      "timeout_seconds": 60,
+      "query_prefix": "{text}",
+      "document_prefix": "{text}",
+      "_comment": "Opt-in adapter route alias, NOT embeddinggemma:300m. Set verified model dimensions and gateway base_url before use; see docs/gemma-multimodal-embedding.md. No upstream multimodal Gemma deployment is assumed."
     },
     "gemini": {
       "enabled": false,

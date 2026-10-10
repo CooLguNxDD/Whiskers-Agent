@@ -21,16 +21,17 @@ same row. ``status='processing'`` removes claimed rows from the
 ``embedding_jobs_pending`` partial index so they're invisible to subsequent
 scans without locking the whole table.
 
-Cost guardrail: exactly **one** Gemini call per ``process_batch``. A failure
-parks the whole batch at ``status='failed'`` with the error stored in
-``last_error`` — no partial retries, no thundering herd.
+Built-in jobs are batched by configured model; a failed model group is parked
+at ``status='failed'`` without automatic retries. Plugin-owned consumers are
+registered by identity pair, dispatched sequentially, and own their conditional
+atomic vector/status publication and retry policy (no additional worker loop).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import text, func, update
 from sqlalchemy.dialects.postgresql import insert
@@ -185,10 +186,59 @@ _STMT_BUILDERS = {
 _KNOWN_OPS = frozenset(_STMT_BUILDERS.keys()) - frozenset({"route"})
 
 
+# Plugin consumers own their atomic vector/status writes and conditional failure handling.
+# Pair identity prevents an asset operation from stealing another plugin's jobs.
+_EMBEDDING_CONSUMERS: dict[tuple[str, str], Callable[[dict], Awaitable[None]]] = {}
+
+
+def register_embedding_consumer(plugin_id: str, operation_id: str, consumer: Callable[[dict], Awaitable[None]]) -> None:
+    """Register an idempotent plugin-owned durable consumer on the existing worker loop."""
+    _EMBEDDING_CONSUMERS[plugin_id, operation_id] = consumer
+
+
+def unregister_embedding_consumer(plugin_id: str, operation_id: str) -> None:
+    """Remove one plugin consumer without changing built-in route/unity processing."""
+    _EMBEDDING_CONSUMERS.pop((plugin_id, operation_id), None)
+
+
 async def process_batch(jobs: list[dict[str, Any]]) -> None:
     """Embed an entire batch, grouping jobs by model selection to perform batch queries."""
     if not jobs:
         return
+
+    remaining = []
+    for job in jobs:
+        consumer = _EMBEDDING_CONSUMERS.get((job["plugin_id"], job["operation_id"]))
+        if consumer is None:
+            remaining.append(job)
+            continue
+        try:
+            # Sequential dispatch bounds retained media/provider fan-out to one job at a time.
+            await consumer(job)
+        except Exception:
+            # Consumer handles conditional failure status itself; unconditional writes could
+            # clobber a newer requeue. DB outages remain processing for consumer-specific recovery.
+            logger.warning("embedding consumer failed job_id=%s", job.get("id"))
+    jobs = remaining
+    if not jobs:
+        return
+
+    # Additive producer delegation by BOTH identities; plugin owns byte validation,
+    # selection pinning and revision-CAS persistence. Legacy builders stay unchanged.
+    world_hex_jobs = [j for j in jobs if (
+        j["plugin_id"] == "world_semantic_plugin"
+        and j["operation_id"] == "upsert_world_hex_multimodal"
+    )]
+    if world_hex_jobs:
+        from plugins.world_semantic_plugin.stores.world_hex_store import process_world_hex_jobs
+
+        await process_world_hex_jobs(world_hex_jobs, _mark_failed)
+        jobs = [j for j in jobs if not (
+            j["plugin_id"] == "world_semantic_plugin"
+            and j["operation_id"] == "upsert_world_hex_multimodal"
+        )]
+        if not jobs:
+            return
 
     from core.llm_config_service import resolve_route_embedding
     from db_layer.embeddings.embeddings_core import model_id_for, embed_documents_with

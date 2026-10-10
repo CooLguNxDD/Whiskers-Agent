@@ -258,6 +258,12 @@ The project provides wrapper scripts to simplify database operations and handle 
 
 Marketplace Phase 1: plugin DDL ships inside the plugin package and auto-applies on load.
 
+Approved world-semantic-v2 exception: Alembic `core_051` exclusively owns
+`world_asset_embeddings` DDL, with plugin-owned ORM/store code. The plugin's
+`0009_require_asset_schema.py` is an existence guard only; never duplicate table
+creation under the plugin ledger. Keep existing core/legacy heads intact. See
+`plugins/world_semantic_plugin/ASSET_API.md` for migration/consumer ownership.
+
 | Piece | Location |
 |---|---|
 | Step files | `plugins/<pkg>/migrations/NNNN_name.(sql\|py)` (lex order; revision = stem) |

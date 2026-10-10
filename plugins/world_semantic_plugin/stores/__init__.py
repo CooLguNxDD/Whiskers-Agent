@@ -3,6 +3,8 @@
 from .world_store import (
     ensure_world,
     get_world,
+    get_world_for_tenant,
+    assign_world_tenant,
     full_index,
     apply_diff,
     list_objects_in_hex,
@@ -23,6 +25,8 @@ from .job_store import (
 __all__ = [
     "ensure_world",
     "get_world",
+    "get_world_for_tenant",
+    "assign_world_tenant",
     "full_index",
     "apply_diff",
     "list_objects_in_hex",

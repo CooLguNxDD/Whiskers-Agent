@@ -226,11 +226,12 @@ keeps the key and is not externally re-shaped.
 | Proxy | `core/proxy/`, `core/proxy_tools/` | Mount lifecycle, SSRF-safe transport, scope token registration, gateway tool-visibility (hide all but `run_graph`/`discover_tools`/`authenticate`/`complete_authentication`). OAuth proxies inject tokens via `RelayAuth` (`httpx2.Auth` — FastMCP 4 / MCP SDK v2 reject `httpx.Auth` as `Invalid "auth" argument`, which `ProxyProvider.list_tools` then mounts as 0 namespaced tools). `create_proxy(..., provider_error_strategy="raise")` so a connect failure cannot look like a successful empty catalog. Layer-2 proxy OAuth sends RFC 8707 `resource` (canonical MCP URL) on authorize, token, and refresh — Atlassian `/v2/mcp` 401s tokens issued without it. |
 | Auth | `oauth/`, `core/api_key_management/`, `core/user_management/` | Layer 1 inbound RS256 JWT + PKCE; Layer 2 per-plugin external OAuth relay; pgcrypto API keys (`[]`=deny-all, `["all"]`=bypass). `core/auth_service.py::get_auth_service()` is the plugin-facing boundary (`IAuthService`) — `principal_from_bearer`/`principal_from_session_cookie`/`mint_scoped_token` wrap `core.context._oauth_svc` + `core.api_key_management.store` so plugins never touch `oauth_provider._svc` or `OAuthService._mint_jwt` directly; mounted on `PluginContext.auth_service`. |
 | Memory | `core/memory/` | Tenant-scoped namespaces; backends `memory` → `memory_content_vectors`, `search` → `search_content_vectors`. `memory_plugin` is an MCP façade only. |
+| Multimodal embeddings | `db_layer/embeddings/multimodal.py`, shared `embeddings_core.py` resolution | Opt-in `gemma-multimodal` provider/profile; typed text + PNG/JPEG/PCM WAV documents, bounded async batches, finite indexed vectors. Requires a compatible LiteLLM content-parts adapter; `embeddinggemma:300m` stays text-only. Model, width and endpoint are configured, not assumed. Serving prerequisites/API: `docs/gemma-multimodal-embedding.md`. |
 | Search engine | `db_layer/embeddings/search_engine.py` | Single choke point: `SearchSpec` + `search()` decides hybrid (dense cosine + `ts_rank_cd` FTS + RRF) vs dense-only per collection. All 6 search paths are thin adapters. |
 | Artifacts | `core/artifact_store/` | MinIO offload, tenant-scoped `short_id` links, session-gated REST, MCP `list/get/fetch_artifact` (GOAP-denylisted). `plugin_store.py::get_artifact_store()` is the plugin-facing boundary (`IArtifactStore`) — wraps `minio_client` + `db_layer.artifact_link_store` behind `put_bytes`/`get_bytes`/`remove_bytes`/`presigned_url`/`create_link`/`link_by_short_id`/`short_id_exists`; mounted on `PluginContext.artifact_store`. Retention: `artifact_sweeper` (see §1) deletes row + object past `scheduled_jobs.artifact_sweep.retention_hours`, bucket-allowlisted. |
 | Telemetry | `core/telemetry/`, `db_layer/telemetry_store.py`, `db_layer/analytics_store.py` | Event buffer persistence + real-time WS streaming, analytics KPIs. Core **never imports a plugin for a metric**: plugins push live gauges in from their lifecycle hooks via `collector.register_gauge_provider(key, callable)` / `unregister_gauge_provider` (e.g. relay's `session_registry.active_count` in `on_ready`; `api/analytics_routes.py`'s `active_sessions` KPI reads this too — never `plugins.*` directly). `snapshot()` evaluates each provider in its own try/except, so one bad provider can't zero the rest; an unregistered gauge falls back to `0`. **Product axis** (`core_049_telemetry_feature_and_graph_runs`): `tool_call_events.feature` (`'mcp'` default) vs `graph_run_events` (one row per whole graph run, `collector.record_graph_run`) — a tool call dispatched *inside* a run still records to `tool_call_events` with `parent_run_id` and must never be summed as a second graph row (real invocation path: `core_graph/mcp_tool.py::_stream_graph_impl_inner`'s `finally`, not `mode_router._run_root`, which the current stack-selection wiring never reaches for a root-classified request — kept for direct/test callers only). Plugin-owned ask audit: `portfolio_ask_turns` (`plugins/portfolio_plugin/ask/telemetry.py`, mirrors bake's `record_bake_run` dual-write) — overlay content stays ephemeral, only question/intent/outcome persist. Visitor-controlled string columns are `VARCHAR` capped (`0008_ask_turn_column_widths`; `create_ask_turn` clips). TTL sweepers (`telemetry_ttl_sweeper`, plugin `ask/ttl_sweeper`) delete at most 5000 rows per tick and return `True` so a backlog drains without one unbounded `DELETE`. A failed collector flush requeues the failed batch *in front* of events that arrived mid-await so `maxlen` drops oldest. |
 | LLM providers | `core/llm_provider_management/` | Dynamic `ProviderSpec` registry — one file per provider, no if/elif dispatch. Adding a provider = new file + one import. |
-| Migrations | `migrations/versions/core/` (Alembic, core only) + `plugins/<pkg>/migrations/` (`NNNN_name.sql|py`, applied by `db_layer/plugin_schema_migrator.py`) | Plugin DDL never uses Alembic branches. |
+| Migrations | `migrations/versions/core/` (Alembic, core only) + `plugins/<pkg>/migrations/` (`NNNN_name.sql|py`, applied by `db_layer/plugin_schema_migrator.py`) | Plugin DDL never uses Alembic branches. Approved world-semantic-v2 exception: `core_051` exclusively owns `world_asset_embeddings`; plugin `0009_require_asset_schema` only guards existence, no duplicate DDL (S03's distinct `0009_world_vector_spaces` coexists; select migrations by full revision id, never sort position). S04's `0010_world_tenant_owner` adds nullable `worlds.tenant_id` with no backfill. |
 
 ### LLM providers (built-in)
 `openai`, `anthropic`, `gemini` (AI Studio), `gemini-vertex` (Express mode, API-key only),
@@ -258,7 +259,7 @@ core_graph/             LangGraph orchestrator: node/, goap/, subgraphs/ (specia
                         ladder.py, selection.py, manifest_effort.py, defaults/core_roles.json —
                         see §3.3), runtime/, harness/, agent_loop/, goap_agent/, prompts/, worker/,
                         registry/, mcp_tool.py, states.py
-db_layer/               connection, models/, embeddings/, vault, per-domain *_store.py
+db_layer/               connection, models/, embeddings/ (multimodal.py typed media client), vault, per-domain *_store.py
                         (incl. model_role_store.py — model_role_specs DB overrides),
                         plugin_schema_migrator.py
 api/                    REST/WS routes: admin, plugin_routes/, tool, config, playground, api_key,
@@ -268,12 +269,15 @@ oauth/                  OAuthService (L1), ExternalOAuthRelay (L2), provider + r
 plugins/                portfolio_plugin, job_search_plugin
                         (posting_ingest.py, portfolio_link.py, flow_specs/career_ops_apply_v1.json),
                         search_plugin, memory_plugin, jules_plugin, cat_terminal_relay_plugin,
-                        world_semantic_plugin, cat_fleet_chat_plugin
+                        world_semantic_plugin (asset_index.py, asset_models.py, asset_adapters.py,
+                        world_adapters.py, stores/asset_store.py, stores/world_hex_store.py,
+                        MCPTools/semantic_tools.py, ASSET_API.md, WORLD_HEX_API.md), cat_fleet_chat_plugin
 utils/                  response_shape/response_format (11-step pipeline), api_utils, short_id,
                         config_registry, server_config, error_response, minio_client, telemetry,
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
 config/                 server_config.json, plugin_config.json, tools_api_config.json,
                         embedding_config.json (+ *_example.json)
+docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract)
 migrations/             Alembic core chain (versions/core/)
 Tools/                  tools_generator.py, semantic_tools_generator.py, migration_generator.py,
                         openapi_pipeline/ (live OpenAPI / FastAPI / Flask / Express ingest)
@@ -492,6 +496,39 @@ goals/                  agent goal files / achieve() persistence
   passes this gate, same as every other `evaluate_access` call site.
 - **jules_plugin** — Jules cloud-agent sessions + review fleet; poll_specs drive wait-step injection.
 - **world_semantic_plugin** — Unity hex-world spatial context (index/diff HTTP + MCP query tools).
+  Asset library services (`asset_index.py`, `asset_models.py`, `stores/asset_store.py`) ingest
+  craft-v3 metadata + validated reference bytes into tenant/world/asset-keyed `world_asset_embeddings`
+  (approved Alembic `core_051`; plugin lifecycle `0009_require_asset_schema` is a guard only). The existing embedding
+  worker supports plugin-owned consumers registered by `(plugin_id, operation_id)`; asset op
+  `upsert_world_asset_embedding` is registered on load, removed on unload, and never steals unity
+  jobs. Immutable byte snapshots + content/model hash + generation-guarded atomic publication
+  prevent duplicate/stale vectors. Both-reference policy is normalized equal-weight mean of
+  unit text+image/text+audio vectors; missing optional files emit explicit warnings, invalid bytes
+  fail. Text/image dense search filters tenant/world/model/kind/all-tags before top-k. Thin
+  authenticated adapters live in `asset_adapters.py`. S04 registered `search_assets`, `index_assets`,
+  `search_world`, and `index_world` in `manifest.json` (capabilities + read/write scopes) and
+  `MCPTools/semantic_tools.py`. Unity-facing self-authenticating HTTP routes are wired in `routes.py`:
+  `POST /api/world/none/{world_id}/assets/{index,search}` and `POST /api/world/none/{world_id}/world/{index,search}`
+  only — no `/api/world/none/{world_id}/{index,search}` alias (it shadowed the legacy public spatial
+  `/api/world/{world_id}/index` contract, which stays unchanged and never calls semantic services).
+  Every semantic call resolves an explicit `Principal.tenant_id > 0` through `get_auth_service()` and
+  evaluates scopes (`group:world_semantic_plugin:read` / `write`) via `evaluate_access`. World ops then
+  require **ownership**: `stores.get_world_for_tenant` (`WHERE world_id AND tenant_id = principal tenant`,
+  plugin migration `0010_world_tenant_owner` adds nullable `worlds.tenant_id`, **no backfill** — existing
+  worlds stay unowned until an operator claims them via `assign_world_tenant`/SQL). Foreign, unowned and
+  absent worlds are one indistinguishable not-found (HTTP 404 `world_not_found`, MCP `LookupError`), and
+  no projection/embedding/search/enqueue runs after a denial. The established projection comes from the
+  owned row; hex vectors bind to `world-hex-v1:[tenant_id, world_id]` and search also filters `meta.tenant_id`.
+  Asset `world_id`s are tenant-private library namespaces (rows keyed by tenant), not `worlds` rows.
+  Bodies with `tenant_id`/`trusted_root`, mismatched `world_id` or projection patches are 400; trusted roots
+  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). Exact signatures, root configuration, retry lease, migration ownership and API details:
+  [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
+  [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
+  [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
+  Offline E2E coverage is in `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py`: registered
+  tools/routes → real services → real `embedding_worker` claim/dispatch/completion, with only the provider
+  and SQL session doubled (search double evaluates the real filter clauses + model space). Runs with
+  `--network none`; live GPU/LLM serving is unverified and deferred to the Saturday human smoke test.
 - **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
   (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
   Tools are tagged `read` / `write` / `wait` so those scope groups are independent.
@@ -573,7 +610,7 @@ Config in `pyproject.toml` and `requirements-dev.txt`. Pullfrog agent workflows 
 
 ## 8. Tech Stack
 
-- **Core**: Python 3.11, FastMCP, `rich` (terminal TUIs), `jsonschema` (catalog execute validation)
+- **Core**: Python 3.11, FastMCP, `rich` (terminal TUIs), `jsonschema` (catalog execute validation), Pillow (multimodal PNG/JPEG validation)
 - **Orchestration**: LangGraph (Postgres checkpointer), custom GOAP planner
 - **Data**: PostgreSQL + pgvector, SQLAlchemy 2.0 async ORM, Alembic, MinIO (presigned object storage)
 - **Security**: PyJWT (RS256), bcrypt, argon2-cffi, pyotp (TOTP step-up), pgcrypto vault

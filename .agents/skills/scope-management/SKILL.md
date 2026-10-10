@@ -173,6 +173,10 @@ method), or `db_layer.api_key_store`/`core.api_key_management.*` directly.
   the JWT's `ocat_role` claim (None for API-key principals) and must still be
   passed through to `ScopeGrant(role=...)` for admin-bypass evaluation; a
   caller that drops it silently loses admin bypass on the JWT path.
+  `Principal.tenant_id` additionally carries only an explicit positive integer
+  from verified API-key storage or JWT `whiskers_tenant`/legacy `ocat_tenant`
+  claims. Missing or malformed values remain `None`; tenant-scoped plugin
+  adapters must reject them, never substitute `current_tenant_id` or tenant 1.
 - `principal_from_session_cookie(token) -> str | None` — subject-only, for the
   Operator Console's HttpOnly admin session cookie.
 - `mint_scoped_token(*, subject, client_id, scopes, ttl) -> (jwt, jti, expires_at)`
