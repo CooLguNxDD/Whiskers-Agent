@@ -288,3 +288,9 @@ def register_routes() -> None:
         owner=OWNER,
         auth_policy=AuthPolicy.PUBLIC,
     )
+
+    from plugins.world_semantic_plugin.asset_adapters import register_asset_routes
+    from plugins.world_semantic_plugin.world_adapters import register_world_routes
+
+    register_asset_routes()
+    register_world_routes()

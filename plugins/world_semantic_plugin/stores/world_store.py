@@ -102,6 +102,41 @@ async def get_world(world_id: str) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+async def get_world_for_tenant(world_id: str, tenant_id: int) -> dict[str, Any] | None:
+    """Load a world only when owned by ``tenant_id``; foreign, unowned and absent are all None."""
+    if type(tenant_id) is not int or tenant_id < 1:
+        return None
+    async with get_async_session() as session:
+        result = await session.execute(
+            text(
+                """
+                SELECT world_id, tenant_id, name, anchor_lat, anchor_lng,
+                       meters_per_degree, base_res, layer_height
+                FROM worlds WHERE world_id = :world_id AND tenant_id = :tenant_id
+                """
+            ),
+            {"world_id": world_id, "tenant_id": tenant_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
+async def assign_world_tenant(world_id: str, tenant_id: int) -> bool:
+    """Operator helper: claim an existing *unowned* world for a tenant; never reassigns."""
+    if type(tenant_id) is not int or tenant_id < 1:
+        raise ValueError("tenant_id must be a positive integer")
+    async with get_async_session() as session:
+        result = await session.execute(
+            text(
+                "UPDATE worlds SET tenant_id = :tenant_id, updated_at = now() "
+                "WHERE world_id = :world_id AND tenant_id IS NULL"
+            ),
+            {"world_id": world_id, "tenant_id": tenant_id},
+        )
+        await session.commit()
+        return bool(result.rowcount)
+
+
 async def _ensure_hex_chain(
     session,
     world_id: str,

@@ -15,12 +15,16 @@
     "claim_hexes",
     "release_hexes",
     "renew_lease",
-    "critique_region"
+    "critique_region",
+    "search_assets",
+    "search_world",
+    "index_assets",
+    "index_world"
   ],
   "scopes": [
     {"token": "plugin:world_semantic_plugin", "description": "Full access to world semantic tools"},
-    {"token": "group:world_semantic_plugin:read", "description": "Query spatial world and hex objects"},
-    {"token": "group:world_semantic_plugin:write", "description": "Claim, lease, and place spatial world objects"}
+    {"token": "group:world_semantic_plugin:read", "description": "Query spatial world, hex objects, and semantic indices"},
+    {"token": "group:world_semantic_plugin:write", "description": "Claim, lease, place spatial objects, and ingest semantic indices"}
   ],
   "gate": {
     "core": ["core:graph:read"]

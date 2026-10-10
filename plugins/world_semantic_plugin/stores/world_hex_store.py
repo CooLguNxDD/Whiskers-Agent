@@ -188,6 +188,8 @@ async def search_documents(context: AuthorizedWorld, query: str, selection: dict
         return stmt.where(
             UnityWorldVector.world_id == context.namespace,
             UnityWorldVector.doc_kind == DOC_KIND,
+            # Defense in depth: the namespace already encodes the tenant; rows also carry it.
+            UnityWorldVector.meta["tenant_id"].astext == str(context.tenant_id),
             func.vector_dims(UnityWorldVector.embedding) == dimensions,
         )
     # Canonicalize numeric configuration strings just as the S01 client does,
