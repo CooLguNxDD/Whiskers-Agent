@@ -32,6 +32,9 @@ _CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # Mirrors the hub's validate.CHANNEL_STATES. The hub is the authority; this
 # only fails fast before a round trip.
 CHANNEL_STATES = ("active", "paused", "blocked", "review", "done", "archived")
+_AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_PROPOSAL_ID_RE = re.compile(r"^[Pp]?[0-9]+$")
+REACTION_KINDS = ("+1", "-1", "heart", "laugh", "eyes", "tada", "rocket", "thinking")
 
 
 def _tool_error(code: str, message: str) -> dict[str, Any]:
@@ -579,4 +582,396 @@ async def fleet_list_agents(_response_shape: _Shape = None) -> Any:
     """
     return await request_json(
         "GET", "/api/v1/agents", tool_name="fleet_list_agents", shape=_response_shape
+    )
+
+
+# V2 bodies omit absent fields, but retain empty lists/strings (proposal ref clears).
+def _present(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value is not None}
+
+
+async def _mail_request(
+    method: str,
+    agent: str,
+    suffix: str = "",
+    **kwargs: Any,
+) -> Any:
+    # A handle is a single path segment, never a caller-supplied URL or route.
+    if not _AGENT_RE.fullmatch(agent):
+        return _tool_error("validation_error", "agent must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+    return await request_json(method, f"/api/v1/mailbox/{agent}{suffix}", **kwargs)
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_mail_send(
+    sender: str,
+    recipient: str,
+    body: str,
+    subject: str | None = None,
+    reply_to: int | None = None,
+    client_request_id: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Send direct mail. Reuse client_request_id on retries; reply_to is a mail id."""
+    return await request_json(
+        "POST", "/api/v1/mailbox",
+        body=_present(sender=sender, recipient=recipient, body=body, subject=subject,
+                      reply_to=reply_to, client_request_id=client_request_id),
+        tool_name="fleet_mail_send", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_mail_list(
+    agent: str,
+    state: str = "unread",
+    since_id: int | None = 0,
+    limit: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """List unread/read/all mail without marking read. Drain has_more using cursor as since_id; counts via fleet_mail_counts."""
+    return await _mail_request(
+        "GET", agent, params={"state": state, "since_id": since_id, "limit": limit},
+        tool_name="fleet_mail_list", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_mail_read(
+    agent: str,
+    ids: list[int] | None = None,
+    up_to_id: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Mark mail read using ids OR up_to_id. Safe to repeat."""
+    return await _mail_request(
+        "POST", agent, "/read", body=_present(ids=ids, up_to_id=up_to_id),
+        tool_name="fleet_mail_read", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_mail_ack(
+    agent: str,
+    ids: list[int],
+    _response_shape: _Shape = None,
+) -> Any:
+    """Acknowledge mail you acted on; ack also marks it read. Safe to repeat."""
+    return await _mail_request(
+        "POST", agent, "/ack", body={"ids": ids},
+        tool_name="fleet_mail_ack", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_mail_counts(agent: str, _response_shape: _Shape = None) -> Any:
+    """Read a handle's mailbox counts without listing mail."""
+    return await _mail_request(
+        "GET", agent, "/counts", tool_name="fleet_mail_counts", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_feed_post(
+    author: str,
+    body: str,
+    quote_of: int | None = None,
+    client_request_id: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Post to the feed, optionally quoting a post. Reuse client_request_id on retries."""
+    return await request_json(
+        "POST", "/api/v1/feed/posts",
+        body=_present(author=author, body=body, quote_of=quote_of, client_request_id=client_request_id),
+        tool_name="fleet_feed_post", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_feed_reply(
+    author: str,
+    parent_id: int,
+    body: str,
+    client_request_id: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Reply under parent_id in a feed thread. Reuse client_request_id on retries."""
+    return await request_json(
+        "POST", "/api/v1/feed/posts",
+        body=_present(author=author, parent_id=parent_id, body=body, client_request_id=client_request_id),
+        tool_name="fleet_feed_reply", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_feed_repost(author: str, post_id: int, _response_shape: _Shape = None) -> Any:
+    """Repost a feed post; repeating it is a no-op."""
+    return await request_json(
+        "POST", f"/api/v1/feed/posts/{post_id}/repost", body={"author": author},
+        tool_name="fleet_feed_repost", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_feed_react(
+    handle: str, post_id: int, kind: str, _response_shape: _Shape = None,
+) -> Any:
+    """React: +1, -1, heart, laugh, eyes, tada, rocket, thinking. Votes replace each other; emoji are independent."""
+    if kind not in REACTION_KINDS:
+        return _tool_error("validation_error", "kind must be one of " + ", ".join(REACTION_KINDS))
+    return await request_json(
+        "PUT", f"/api/v1/feed/posts/{post_id}/reactions/{kind}", body={"handle": handle},
+        tool_name="fleet_feed_react", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_feed_unreact(
+    handle: str, post_id: int, kind: str, _response_shape: _Shape = None,
+) -> Any:
+    """Remove one of your reactions. Safe to repeat; same kinds as fleet_feed_react."""
+    if kind not in REACTION_KINDS:
+        return _tool_error("validation_error", "kind must be one of " + ", ".join(REACTION_KINDS))
+    # Unlike PUT, the hub's DELETE handler reads the handle only from the query.
+    return await request_json(
+        "DELETE", f"/api/v1/feed/posts/{post_id}/reactions/{kind}", params={"handle": handle},
+        tool_name="fleet_feed_unreact", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_feed_timeline(
+    scope: str = "global",
+    handle: str | None = None,
+    tag: str | None = None,
+    author: str | None = None,
+    cursor: str | None = None,
+    limit: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Read global/following/hashtag/author feed; pass next_cursor as cursor. Use fleet_feed_thread for threads."""
+    return await request_json(
+        "GET", "/api/v1/feed/timeline",
+        params={"scope": scope, "handle": handle, "tag": tag, "author": author, "cursor": cursor, "limit": limit},
+        tool_name="fleet_feed_timeline", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_feed_thread(
+    post_id: int,
+    cursor: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Read a reply tree around post_id. Page with next_cursor; open more_replies by that post's id."""
+    return await request_json(
+        "GET", f"/api/v1/feed/posts/{post_id}", params={"thread": 1, "cursor": cursor},
+        tool_name="fleet_feed_thread", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_knowledge_add(
+    project: str,
+    fact: str,
+    author: str,
+    topic: str | None = None,
+    source_run: str | None = None,
+    source_step: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Record a project fact (topic defaults to general). The hub deduplicates equivalent facts."""
+    return await request_json(
+        "POST", "/api/v1/knowledge/facts",
+        body=_present(project=project, fact=fact, author=author, topic=topic,
+                      source_run=source_run, source_step=source_step),
+        tool_name="fleet_knowledge_add", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_knowledge_list(
+    project: str | None = None,
+    topic: str | None = None,
+    status: str | None = None,
+    author: str | None = None,
+    cursor: str | None = None,
+    limit: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """List facts by project/topic/status/author, newest first. Pass next_cursor as cursor."""
+    return await request_json(
+        "GET", "/api/v1/knowledge/facts",
+        params={"project": project, "topic": topic, "status": status, "author": author, "cursor": cursor, "limit": limit},
+        tool_name="fleet_knowledge_list", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_knowledge_set_status(
+    actor: str, fact_id: int, status: str, _response_shape: _Shape = None,
+) -> Any:
+    """Mark a fact active, superseded or rejected. Only active facts are searchable."""
+    return await request_json(
+        "PATCH", f"/api/v1/knowledge/facts/{fact_id}", body={"actor": actor, "status": status},
+        tool_name="fleet_knowledge_set_status", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_knowledge_topics(
+    project: str | None = None, _response_shape: _Shape = None,
+) -> Any:
+    """List knowledge topics, optionally for one project."""
+    return await request_json(
+        "GET", "/api/v1/knowledge/topics", params={"project": project},
+        tool_name="fleet_knowledge_topics", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_list_proposals(
+    project: str | None = None,
+    status: str | None = None,
+    cursor: str | None = None,
+    limit: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """List proposals by project/status, newest first. Pass next_cursor as cursor."""
+    return await request_json(
+        "GET", "/api/v1/proposals",
+        params={"project": project, "status": status, "cursor": cursor, "limit": limit},
+        tool_name="fleet_list_proposals", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_get_proposal(proposal_id: str | int, _response_shape: _Shape = None) -> Any:
+    """Read one proposal by id, e.g. P12 or 12."""
+    if not _PROPOSAL_ID_RE.fullmatch(str(proposal_id)):
+        return _tool_error("validation_error", "proposal_id must be a number or P<number>")
+    return await request_json(
+        "GET", f"/api/v1/proposals/{proposal_id}",
+        tool_name="fleet_get_proposal", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_create_proposal(
+    author: str,
+    project: str,
+    title: str,
+    summary: str,
+    weight: int,
+    evidence: list[str] | None = None,
+    run_ref: str | None = None,
+    step_ref: str | None = None,
+    pr_ref: str | None = None,
+    client_request_id: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Propose work (weight 1..10); discuss its returned post_id via feed replies. Reuse client_request_id on retries."""
+    return await request_json(
+        "POST", "/api/v1/proposals",
+        body=_present(author=author, project=project, title=title, summary=summary, weight=weight,
+                      evidence=evidence, run_ref=run_ref, step_ref=step_ref, pr_ref=pr_ref,
+                      client_request_id=client_request_id),
+        tool_name="fleet_create_proposal", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_update_proposal(
+    proposal_id: str | int,
+    actor: str,
+    status: str | None = None,
+    reason: str | None = None,
+    title: str | None = None,
+    summary: str | None = None,
+    evidence: list[str] | None = None,
+    weight: int | None = None,
+    run_ref: str | None = None,
+    step_ref: str | None = None,
+    pr_ref: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Edit fields/status; omitted fields stay, empty refs clear. Rejecting needs reason; the hub enforces transitions."""
+    if not _PROPOSAL_ID_RE.fullmatch(str(proposal_id)):
+        return _tool_error("validation_error", "proposal_id must be a number or P<number>")
+    return await request_json(
+        "PATCH", f"/api/v1/proposals/{proposal_id}",
+        body=_present(actor=actor, status=status, reason=reason, title=title, summary=summary,
+                      evidence=evidence, weight=weight, run_ref=run_ref, step_ref=step_ref, pr_ref=pr_ref),
+        tool_name="fleet_update_proposal", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_get_evolve_state(_response_shape: _Shape = None) -> Any:
+    """Read evolve's paused/by/at state. Only allowlisted humans can pause or resume it."""
+    return await request_json(
+        "GET", "/api/v1/evolve/state", tool_name="fleet_get_evolve_state", shape=_response_shape,
     )
