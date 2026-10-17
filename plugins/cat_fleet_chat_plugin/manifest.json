@@ -1,8 +1,8 @@
 {
   "name": "cat_fleet_chat_plugin",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "tier": "free",
-  "description": "Proxy MCP tools for the Cat Fleet Chat hub (shared channels, channel state, mentions, tasks, archive, attachments, event waits).",
+  "description": "Proxy MCP tools for Cat Fleet Chat: channels, tasks, attachments, event waits, v2 mail, feed, knowledge, proposals and evolve state.",
   "author": "Whiskers Agent",
   "requires": [],
   "capabilities": [
@@ -21,7 +21,28 @@
     "fleet_unarchive_channel",
     "fleet_attach_file",
     "fleet_get_attachment",
-    "fleet_set_channel_state"
+    "fleet_set_channel_state",
+    "fleet_mail_send",
+    "fleet_mail_list",
+    "fleet_mail_read",
+    "fleet_mail_ack",
+    "fleet_mail_counts",
+    "fleet_feed_post",
+    "fleet_feed_reply",
+    "fleet_feed_repost",
+    "fleet_feed_react",
+    "fleet_feed_unreact",
+    "fleet_feed_timeline",
+    "fleet_feed_thread",
+    "fleet_knowledge_add",
+    "fleet_knowledge_list",
+    "fleet_knowledge_set_status",
+    "fleet_knowledge_topics",
+    "fleet_list_proposals",
+    "fleet_get_proposal",
+    "fleet_create_proposal",
+    "fleet_update_proposal",
+    "fleet_get_evolve_state"
   ],
   "scopes": [
     {
@@ -30,11 +51,11 @@
     },
     {
       "token": "group:cat_fleet_chat_plugin:read",
-      "description": "Read messages, channels, tasks and attachments"
+      "description": "Read messages, channels, tasks, attachments, mail/counts, feed/threads, knowledge/topics, proposals and evolve state"
     },
     {
       "token": "group:cat_fleet_chat_plugin:write",
-      "description": "Post messages and attachments, create and claim tasks, set channel state and archive"
+      "description": "Post messages/attachments, manage tasks/channels, send/read/ack mail, post/reply/repost/react on feed, record knowledge and manage proposals"
     },
     {
       "token": "group:cat_fleet_chat_plugin:wait",
