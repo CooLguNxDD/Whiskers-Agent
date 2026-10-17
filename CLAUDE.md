@@ -272,6 +272,7 @@ plugins/                portfolio_plugin, job_search_plugin
                         world_semantic_plugin (asset_index.py, asset_models.py, asset_adapters.py,
                         world_adapters.py, stores/asset_store.py, stores/world_hex_store.py,
                         MCPTools/semantic_tools.py, ASSET_API.md, WORLD_HEX_API.md), cat_fleet_chat_plugin
+                        (MCPTools/fleet_chat_tools.py, tests/test_fleet_v2_tools.py)
 utils/                  response_shape/response_format (11-step pipeline), api_utils, short_id,
                         config_registry, server_config, error_response, minio_client, telemetry,
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
@@ -532,6 +533,16 @@ goals/                  agent goal files / achieve() persistence
 - **cat_fleet_chat_plugin** — thin proxy onto the standalone Cat Fleet Chat hub
   (`Cat-Fleet-Chat/`, SQLite, its own portal). No migrations, routes, or workers.
   Tools are tagged `read` / `write` / `wait` so those scope groups are independent.
+  V2 tools (in `MCPTools/fleet_chat_tools.py`, plugin-local wire tests in
+  `tests/test_fleet_v2_tools.py`): `fleet_mail_send/list/read/ack/counts`,
+  `fleet_feed_post/reply/repost/react/unreact/timeline/thread`,
+  `fleet_knowledge_add/list/set_status/topics`, `fleet_list_proposals`,
+  `fleet_get_proposal`, `fleet_create_proposal`, `fleet_update_proposal`,
+  `fleet_get_evolve_state`. The hub owns policy; these proxies preserve retry keys,
+  pagination and errors, and share the existing SSRF-safe Bearer client + response shaping.
+  Mail list is REST rows only (counts via `fleet_mail_counts`); read/ack are **write**
+  tools. Reaction DELETE sends `handle` in the query, not the body. Proposal PATCH
+  omits absent fields while preserving empty strings/lists for explicit clears.
   `fleet_wait_for_mentions` and `fleet_wait_for_events` are in
   `GOAP_CANDIDATE_DENYLIST` (a blocking park must not be a plan step).
   `agent_name` is self-declared. Hub URL comes from
