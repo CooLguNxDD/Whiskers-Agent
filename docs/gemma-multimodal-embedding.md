@@ -82,12 +82,29 @@ CAT_ALLOW_LOCAL_PROXIES=1   # the SSRF-safe transport blocks private hosts other
 EmbeddingGemma expects a task prefix on text inputs:
 
 - queries: `task: search result | query: <text>`
-- documents: `title: none | text: <text>`
+- documents: `title: none | text: <text>`, or `title: <title> | text: <text>` when a title exists
 
-Apply them to the **text** part only. Image and audio parts are sent as-is, with no
-prefix. A joint document (text + media) gets the document prefix on its text part.
-The prefix is not part of the sidecar: the client adds it before the request (see
-the `query_prefix` / `document_prefix` profile settings).
+`GemmaMultimodalEmbeddings` adds them itself, to the **text part only**; image and
+audio parts are sent as-is. `aembed_query` uses the query prefix. `aembed_documents`
+and the text of every `aembed_multimodal` document (including a joint text+media
+document) use the document prefix. Titles come from `EmbeddingInput.title` or, for
+`embed_batch` / `embed_documents_with`, their `titles` argument (the core hands raw
+text and titles to this client rather than formatting with the profile first).
+
+- On by default for `gemma-multimodal`. Turn off with the `task_prefixes=False`
+  constructor/selection option or `EMBED_TASK_PREFIXES=0` (`false|no|off` also work).
+- Idempotent: text that already starts with the query prefix, or with
+  `title: ... | text: `, is never prefixed twice.
+- Changing this changes the vector space of text: a collection indexed without
+  prefixes needs a re-index after the switch.
+
+### Vector normalization
+
+The client requires `dimensions` (768 for embeddinggemma-2) finite values per
+vector, a complete unique index permutation, and then checks the L2 norm. If a
+vector is not within `|norm - 1| <= 1e-2`, it is **normalized client-side** (not
+rejected); a zero vector is an error. Disable with the `normalize=False`
+option only for toy/test vectors.
 
 ### LM Studio: legacy text-only option
 
@@ -106,7 +123,28 @@ llama-server's native `/embedding` endpoint accepts an `image_data` field, but i
 `/v1/embeddings` with nested content parts
 (`input: [{content: [{type: "image_url", ...}]}]`) and `--mmproj` loaded, as the
 wire contract below describes. Audio through llama-server is unverified until the
-live smoke test (S02) passes.
+live smoke test below reports it. The client rejects a `base_url` ending in
+`/embedding` or `/embeddings`, and never serializes `image_data`.
+
+### Live smoke test
+
+`scripts/smoke_embed_multimodal.py` checks a running sidecar (never run by unit tests):
+
+```bash
+docker compose up -d embed && docker compose ps embed   # wait for (healthy)
+EMBED_BASE_URL=http://127.0.0.1:8081/v1 python scripts/smoke_embed_multimodal.py --write-docs
+```
+
+`EMBED_BASE_URL` defaults to `http://127.0.0.1:8080/v1` (uncomment the loopback port
+mapping above to reach the sidecar from the host); `EMBED_MODEL` / `EMBED_DIMENSIONS`
+default to `embeddinggemma-2` / `768`. Exit 2 means the server is unreachable, 1 a
+failed check, 0 no failure. Checks: text, a generated PNG, a joint text+image
+document, a cross-modal sanity check (caption closer to its own image than to an
+unrelated one) and a generated 16 kHz mono WAV, each with 768 finite values and unit
+norm. Audio is PASS or BLOCKED with the exact HTTP status and sanitized server
+message; two different tones must also embed differently, so an ignored audio part is
+never reported as a pass. `--write-docs` writes `docs/embed-smoke-results.md` (UTC
+timestamp, server build from `/props`, PASS/FAIL/BLOCKED per check).
 
 ## Human-operated registration in local-model-stacks
 
@@ -161,8 +199,8 @@ The disabled `gemma_multimodal` profile in
 - `batch_size`, `max_concurrency`, `max_media_bytes`, `timeout_seconds`: bounded
   settings (defaults 8, 2, 10 MB, 60 s; ceilings 256, 32, 100 MB, 600 s).
 - `query_prefix` / `document_prefix`: `{text}` for this adapter profile; existing
-  text helpers keep their existing prefix behaviour. Typed multimodal documents
-  are sent as authored, without adding active text-profile prefixes.
+  text helpers keep their existing prefix behaviour. The client itself adds the
+  EmbeddingGemma task prefixes to text parts (see Task prefixes above).
 
 Use `selection_for_profile("gemma_multimodal")` for explicit producer/query model
 selection. `EMBED_BASE_URL` and `EMBED_API_KEY` supply runtime endpoint/credential
@@ -310,6 +348,10 @@ integer`.
 
 ## Offline verification and limitations
 
+`test/unit/test_embed_llama_contract.py` runs the client against an in-process fake
+llama-server (`httpx.MockTransport`: nested content parts in, indexed `data` out,
+shuffled indices, llama-style 400/500 error bodies, 404 on `/embedding`) and pins
+task prefixes, normalization, width, sanitized errors and the legacy-route guard.
 `test/unit/test_gemma_multimodal_embed.py` mocks the async HTTP transport boundary
 and checks configured request identity/endpoint, byte-exact PNG/JPEG/WAV payloads,
 joint documents, splitting/order/concurrency, empty calls, invalid media and

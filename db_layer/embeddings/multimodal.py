@@ -13,9 +13,11 @@ import contextlib
 import io
 import logging
 import math
+import os
+import re
 import warnings
 import wave
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from urllib.parse import urlsplit
 
 from langchain_core.embeddings import Embeddings
@@ -33,10 +35,47 @@ class EmbeddingMedia:
 
 @dataclass(frozen=True)
 class EmbeddingInput:
-    """One joint embedding: nonempty text, one reference media item, or both."""
+    """One joint embedding: nonempty text, one reference media item, or both.
+
+    `title` only feeds the document task prefix (`title: <title> | text: ...`) of the text part.
+    """
 
     text: str | None = None
     media: EmbeddingMedia | None = None
+    title: str | None = None
+
+
+# EmbeddingGemma task prefixes; applied to text parts only, never to image/audio parts.
+QUERY_PREFIX = "task: search result | query: "
+DOCUMENT_PREFIX = "title: {title} | text: "
+DOCUMENT_PREFIX_NO_TITLE = "title: none | text: "
+_DOCUMENT_PREFIXED = re.compile(r"title: [^\n]*? \| text: ")
+# Returned vectors must be unit length within this tolerance, else they are normalized client-side.
+NORM_TOLERANCE = 1e-2
+
+
+def _has_task_prefix(text: str) -> bool:
+    return text.startswith(QUERY_PREFIX) or _DOCUMENT_PREFIXED.match(text) is not None
+
+
+def query_text(text: str) -> str:
+    """Apply the query task prefix unless the text already carries a task prefix."""
+    return text if _has_task_prefix(text) else QUERY_PREFIX + text
+
+
+def document_text(text: str, title: str | None = None) -> str:
+    """Apply the document task prefix (`title: none` without a title) unless already prefixed."""
+    if _has_task_prefix(text):
+        return text
+    clean = " ".join(title.split()) if isinstance(title, str) else ""
+    return (DOCUMENT_PREFIX.format(title=clean) if clean else DOCUMENT_PREFIX_NO_TITLE) + text
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
 def _positive_int(value: object, name: str, maximum: int | None = None) -> int:
@@ -116,8 +155,19 @@ def _serialize(inputs: list[EmbeddingInput]) -> list[dict]:
     return documents
 
 
-def _vectors(response: object, count: int, dimensions: int) -> list[list[float]]:
-    """Require a complete indexed permutation and finite numeric vectors of exact width."""
+def _unit(vector: list[float]) -> list[float]:
+    """L2-normalize a vector whose norm is outside NORM_TOLERANCE of 1; reject a zero vector."""
+    norm = math.sqrt(math.fsum(v * v for v in vector))
+    if not math.isfinite(norm) or norm == 0:
+        raise ValueError("embedding response contains a zero or non-normalizable vector")
+    return vector if abs(norm - 1.0) <= NORM_TOLERANCE else [v / norm for v in vector]
+
+
+def _vectors(response: object, count: int, dimensions: int, normalize: bool = True) -> list[list[float]]:
+    """Require a complete indexed permutation and finite numeric vectors of exact width.
+
+    With `normalize`, vectors that are not approximately unit length are L2-normalized client-side.
+    """
     data = response.get("data") if isinstance(response, dict) else None
     if not isinstance(data, list) or len(data) != count:
         raise ValueError("embedding response cardinality mismatch")
@@ -136,6 +186,8 @@ def _vectors(response: object, count: int, dimensions: int) -> list[list[float]]
             ordered[index] = [float(v) for v in vector]
         except (ValueError, OverflowError, TypeError):
             raise ValueError("embedding response contains nonfinite or nonnumeric data") from None
+        if normalize:
+            ordered[index] = _unit(ordered[index])
     return [ordered[i] for i in range(count)]
 
 
@@ -171,18 +223,28 @@ class GemmaMultimodalEmbeddings(Embeddings):
 
     def __init__(self, model: str, dimensions: int, api_key: str | None, base_url: str | None,
                  *, batch_size: int = 8, max_concurrency: int = 2,
-                 max_media_bytes: int = 10_000_000, timeout_seconds: int = 60) -> None:
-        """Validate configuration without I/O; endpoint/model/width have no transport defaults."""
+                 max_media_bytes: int = 10_000_000, timeout_seconds: int = 60,
+                 task_prefixes: bool | None = None, normalize: bool = True) -> None:
+        """Validate configuration without I/O; endpoint/model/width have no transport defaults.
+
+        `task_prefixes` (default on, env `EMBED_TASK_PREFIXES`) adds EmbeddingGemma task prefixes to
+        text parts; `normalize` L2-normalizes vectors the server returns un-normalized.
+        """
         if not isinstance(model, str) or not model.strip():
             raise ValueError("multimodal model alias is required")
         parsed = urlsplit(base_url or "")
         if (parsed.scheme not in ("http", "https") or not parsed.hostname
                 or parsed.username or parsed.password or parsed.query or parsed.fragment):
             raise ValueError("multimodal base_url must be an HTTP(S) endpoint without credentials")
+        if parsed.path.rstrip("/").endswith(("/embedding", "/embeddings")):
+            # The client appends /embeddings itself; the legacy /embedding route is never allowed.
+            raise ValueError("multimodal base_url must be the API base (e.g. .../v1), not an embeddings route")
         self.model = model
         self.dimensions = _positive_int(dimensions, "dimensions")
         self.base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self.task_prefixes = _env_flag("EMBED_TASK_PREFIXES", True) if task_prefixes is None else bool(task_prefixes)
+        self.normalize = bool(normalize)
         self.batch_size = _positive_int(batch_size, "batch_size", 256)
         self.max_concurrency = _positive_int(max_concurrency, "max_concurrency", 32)
         self.max_media_bytes = _positive_int(max_media_bytes, "max_media_bytes", 100_000_000)
@@ -221,10 +283,16 @@ class GemmaMultimodalEmbeddings(Embeddings):
             except Exception:
                 raise _failure("invalid_json", count) from None
         try:
-            return _vectors(body, count, self.dimensions)
+            return _vectors(body, count, self.dimensions, self.normalize)
         except ValueError:
             _log_failure("invalid_response", count)
             raise
+
+    def _with_document_prefix(self, document: EmbeddingInput) -> EmbeddingInput:
+        """Prefix the text part only (idempotent); media-only and blank-text inputs pass through."""
+        if not self.task_prefixes or not (document.text and document.text.strip()):
+            return document
+        return replace(document, text=document_text(document.text, document.title))
 
     async def aembed_multimodal(self, inputs: list[EmbeddingInput]) -> list[list[float]]:
         """Embed complete ordered inputs; bound batch size, tasks, in-flight requests and encoded media."""
@@ -244,7 +312,8 @@ class GemmaMultimodalEmbeddings(Embeddings):
                 raise _failure("transport", 0) from None
             for start in range(0, len(inputs), window_size):
                 # Encode only this window; its payloads are released before the next one.
-                documents = await asyncio.to_thread(_serialize, inputs[start:start + window_size])
+                window = [self._with_document_prefix(d) for d in inputs[start:start + window_size]]
+                documents = await asyncio.to_thread(_serialize, window)
                 results = await asyncio.gather(*(
                     self._request(client, documents[i:i + self.batch_size])
                     for i in range(0, len(documents), self.batch_size)
@@ -258,13 +327,20 @@ class GemmaMultimodalEmbeddings(Embeddings):
                 del results
         return vectors
 
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Adapt legacy async text batches to the same multimodal route."""
-        return await self.aembed_multimodal([EmbeddingInput(text=text) for text in texts])
+    async def aembed_documents(self, texts: list[str],
+                               titles: list[str | None] | None = None) -> list[list[float]]:
+        """Adapt async text batches to the multimodal route; optional titles feed the document prefix."""
+        if titles is not None and len(titles) != len(texts):
+            raise ValueError("titles must match texts one to one")
+        return await self.aembed_multimodal([
+            EmbeddingInput(text=text, title=titles[i] if titles else None)
+            for i, text in enumerate(texts)])
 
     async def aembed_query(self, text: str) -> list[float]:
-        """Adapt a legacy async text query without tokenization or binary coercion."""
-        return (await self.aembed_documents([text]))[0]
+        """Embed a text query with the query task prefix (when enabled); no binary coercion."""
+        if self.task_prefixes and isinstance(text, str) and text.strip():
+            text = query_text(text)
+        return (await self.aembed_multimodal([EmbeddingInput(text=text)]))[0]
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Sync use is unsupported; callers must await aembed_documents."""
