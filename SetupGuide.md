@@ -106,6 +106,8 @@ Ensure your `.env` file is configured, then start the stack:
 docker compose up -d
 ```
 
+> **Multimodal embeddings (optional, NVIDIA GPU):** the compose file also defines an `embed` service (llama.cpp serving embeddinggemma-2). `docker compose up -d` starts it too; on a host without an NVIDIA GPU, name the services you want instead (`docker compose up -d postgres minio whiskers-agent cat-admin-frontend`) and keep LM Studio as the text-only fallback. Start only the sidecar with `docker compose up -d embed`. Settings, task prefixes and the LM Studio legacy option: [docs/gemma-multimodal-embedding.md](./docs/gemma-multimodal-embedding.md) and [`.env.example`](./.env.example).
+
 ### Step 2: Run the Master Setup TUI
 
 Launch the guided setup menu interactively inside the running container:
