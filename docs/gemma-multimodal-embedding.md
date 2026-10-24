@@ -23,6 +23,91 @@ accept text/token inputs, not these documents. **This is an explicit adapter
 extension, not a claim of universal stock LiteLLM compatibility.** Mocked tests
 verify the wire contract, not gateway or model deployment support.
 
+## Compose `embed` sidecar (llama.cpp, embeddinggemma-2)
+
+`docker-compose.yml` defines an `embed` service that serves
+`ggml-org/embeddinggemma-2-GGUF` (text + image + audio, 768-wide vectors) through
+llama.cpp's `llama-server` on an OpenAI-compatible `/v1/embeddings`. It is the
+reference deployment of the content-parts adapter below; no LiteLLM adapter is
+needed in front of it. `test/unit/test_embed_sidecar.py` parses the compose file
+and pins every requirement in this section (no docker, no network).
+
+**Start** (NVIDIA GPU and the container toolkit required):
+
+```bash
+docker compose up -d embed        # first start downloads weights, can take minutes
+docker compose ps embed           # wait for (healthy): GET /health
+```
+
+Weights are fetched on first start into the named volume `embed_models`
+(`LLAMA_CACHE=/models`). They are never bind-mounted from the repo and never
+committed. `docker compose down -v` deletes the volume (and Postgres data: see
+CLAUDE.md), forcing a re-download.
+
+**Pinned runtime.** Image `ghcr.io/ggml-org/llama.cpp:server-cuda-b11457`: the
+`gemma-embedding2` architecture landed in llama.cpp PR #30054 (build b11457). The tag
+is a fixed build number, never `latest` or an unpinned `server-cuda`; bump it
+deliberately and re-run the smoke test.
+
+**Model files.** One mechanism: `--hf-repo ggml-org/embeddinggemma-2-GGUF:Q8_0`
+downloads the Q8_0 weights, and `--mmproj-auto` downloads the repo's matching
+`mmproj-embeddinggemma-2-*.gguf` projector (needed for image/audio). Quant must be
+Q8_0 or BF16, never FP16/F16. To pin BF16, change the tag to `:BF16`.
+
+**Flags** (all fixed in the compose `command`): `--embeddings --pooling mean`;
+`--ctx-size 4096 --batch-size 4096 --ubatch-size 4096` (all three equal, so one input
+is never split across physical batches); `--host 0.0.0.0 --port 8080`.
+
+**Network.** Only `whiskers-network`; no host port is published. Other containers
+reach it as `http://embed:8080/v1`. For host-side debugging uncomment the
+`127.0.0.1:8081:8080` line in the service (loopback only; never expose it publicly).
+`whiskers-agent` does not `depends_on` the sidecar, so the stack still boots when
+it is stopped and LM Studio remains a valid fallback.
+
+### Environment
+
+Defaults live in [`.env.example`](../.env.example) (copy by hand into `.env`; the
+code reads exactly these names, compose forwards them to `whiskers-agent`):
+
+```env
+EMBED_PROVIDER=gemma-multimodal
+EMBED_BASE_URL=http://embed:8080/v1
+EMBED_MODEL=embeddinggemma-2
+EMBED_DIMENSIONS=768
+CAT_ALLOW_LOCAL_PROXIES=1   # the SSRF-safe transport blocks private hosts otherwise
+```
+
+### Task prefixes (text only)
+
+EmbeddingGemma expects a task prefix on text inputs:
+
+- queries: `task: search result | query: <text>`
+- documents: `title: none | text: <text>`
+
+Apply them to the **text** part only. Image and audio parts are sent as-is, with no
+prefix. A joint document (text + media) gets the document prefix on its text part.
+The prefix is not part of the sidecar: the client adds it before the request (see
+the `query_prefix` / `document_prefix` profile settings).
+
+### LM Studio: legacy text-only option
+
+LM Studio with Qwen3 Embedding 0.6B stays supported as the fallback: set
+`EMBED_PROVIDER=openai`, `EMBED_MODEL=text-embedding-qwen3-embedding-0.6b`,
+`EMBED_DIMENSIONS=1024`, `EMBED_BASE_URL=http://host.docker.internal:1234/v1`,
+`EMBED_PROFILE=lmstudio` (commented block in `.env.example`). It embeds text only, and
+its 1024-wide vectors are a different space than embeddinggemma-2's 768: switching
+either way requires a re-index; never mix the two in one collection.
+
+### Do not use `/embedding` with `image_data`
+
+llama-server's native `/embedding` endpoint accepts an `image_data` field, but it
+**silently returns a text-only vector** and ignores the image (llama.cpp issue
+#30082), so a "multimodal" index built that way is wrong without any error. Use only
+`/v1/embeddings` with nested content parts
+(`input: [{content: [{type: "image_url", ...}]}]`) and `--mmproj` loaded, as the
+wire contract below describes. Audio through llama-server is unverified until the
+live smoke test (S02) passes.
+
 ## Human-operated registration in local-model-stacks
 
 These are prerequisites/instructions for the human operator; this change does
