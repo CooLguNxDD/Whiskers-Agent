@@ -321,3 +321,9 @@ adapter and real multimodal embedding model remain human serving prerequisites;
 a live deployment smoke test is not authorized by this step. If the intended
 Gemma route is text-only, image/audio serving remains blocked. Nothing here edits
 local-model-stacks or asserts that its current gateway accepts this extension.
+
+## Re-indexing existing vectors
+
+Moving existing LM Studio text vectors to `gemma-multimodal:embeddinggemma-2:768` is a dry-run-first,
+resumable, tenant-scoped re-embed: see [embedding-reindex.md](embedding-reindex.md)
+(`python scripts/reindex_embeddings.py --help`).
