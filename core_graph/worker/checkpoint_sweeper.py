@@ -17,6 +17,28 @@ logger = logging.getLogger("whiskers")
 _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_STALE_HOURS = 24.0
 _STOP_TIMEOUT = 10.0
+_COUNTS: dict[str, int] = {"checkpoints": 0, "blobs": 0, "writes": 0}
+_LAST_DELETED: dict[str, int] = {"deleted": 0}
+_TOTAL_DELETED = 0
+_GAUGES = {
+    "checkpoint_rows_checkpoints": lambda: _COUNTS["checkpoints"],
+    "checkpoint_rows_blobs": lambda: _COUNTS["blobs"],
+    "checkpoint_rows_writes": lambda: _COUNTS["writes"],
+    "checkpoint_sweep_last_deleted": lambda: _LAST_DELETED["deleted"],
+    "checkpoint_sweep_total_deleted": lambda: _TOTAL_DELETED,
+}
+
+
+def _register_gauges() -> None:
+    from core.telemetry.collector import collector
+    for key, provider in _GAUGES.items():
+        collector.register_gauge_provider(key, provider)
+
+
+def _unregister_gauges() -> None:
+    from core.telemetry.collector import collector
+    for key in _GAUGES:
+        collector.unregister_gauge_provider(key)
 
 
 def _interval_seconds() -> float:
@@ -32,10 +54,18 @@ def _stale_hours() -> float:
 
 
 async def _tick() -> bool:
-    """Sweep once, then idle — the sweep owns its own error handling."""
-    from core_graph.runtime.bootstrap import sweep_stale_ephemeral_threads
+    """Refresh cached checkpoint metrics and sweep once, then idle."""
+    global _TOTAL_DELETED
+    from core_graph.runtime.bootstrap import checkpoint_table_counts, sweep_stale_ephemeral_threads
     try:
-        await sweep_stale_ephemeral_threads(older_than_hours=_stale_hours())
+        counts = await checkpoint_table_counts()
+        _COUNTS.update(checkpoints=counts["checkpoints"], blobs=counts["checkpoint_blobs"], writes=counts["checkpoint_writes"])
+    except Exception:
+        logger.debug("checkpoint_sweeper: checkpoint count query failed", exc_info=True)
+    try:
+        deleted = await sweep_stale_ephemeral_threads(older_than_hours=_stale_hours())
+        _LAST_DELETED["deleted"] = int(deleted or 0)
+        _TOTAL_DELETED += _LAST_DELETED["deleted"]
     except Exception:
         logger.exception("checkpoint_sweeper: tick failed")
     return False
@@ -52,12 +82,14 @@ _WORKER = BackgroundWorker(
 
 def run() -> asyncio.Task:
     """Start the worker as a background task. Idempotent while active."""
+    _register_gauges()
     return _WORKER.start()
 
 
 async def stop() -> None:
     """Signal the worker to exit; await completion with force-cancel fallback."""
     await _WORKER.stop()
+    _unregister_gauges()
 
 
 def _enabled() -> bool:
