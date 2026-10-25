@@ -41,6 +41,10 @@ To target specific test classes or test functions, use the standard pytest doubl
 docker exec -e PYTHONPATH=/app whiskers-agent-server pytest test/unit/test_plugin_loader.py::test_toposort_linear_chain
 ```
 
+### 4. Git Worktrees
+The `whiskers-agent-server` container's `/app` is the main checkout, so a git worktree's files are invisible to `docker exec`. When `scripts/run_tests.py` runs on the host and `.git` is a file starting with `gitdir:` (`is_git_worktree`), it instead runs `docker run --rm --network none -v <worktree>:/app -w /app -e PYTHONPATH=/app <image> python scripts/run_tests.py ...` (`build_worktree_docker_cmd`) and sets `MSYS_NO_PATHCONV=1`.
+* Image: env `WHISKERS_TEST_IMAGE` (default `opencattunnelproject-whiskers-agent`). Network: `none` unless env `WHISKERS_TESTS_NETWORK` names one (needed only for DB-backed tests).
+
 ---
 
 ## Pipeline Integration & Automation
