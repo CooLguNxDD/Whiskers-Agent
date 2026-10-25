@@ -171,5 +171,9 @@
     "path_prefixes": ["/mcp", "/api/portfolio"],
     "trust_proxy": false,
     "max_tracked_ips": 10000
+  },
+  "deployment": {
+    "replicas": 1,
+    "workers": 1
   }
 }
