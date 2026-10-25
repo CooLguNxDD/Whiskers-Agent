@@ -108,6 +108,21 @@ _SWEEP_BATCH_LIMIT = 500
 _SWEEP_YIELD_EVERY = 50
 
 
+async def checkpoint_table_counts() -> dict[str, int]:
+    """Return exact row counts for the LangGraph checkpoint tables."""
+    await get_checkpointer()
+    if _pg_pool is None:
+        raise RuntimeError("checkpoint pool is unavailable")
+    counts: dict[str, int] = {}
+    async with _pg_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                await cur.execute(f"SELECT count(*) AS row_count FROM {table}")
+                row = await cur.fetchone()
+                counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
+    return counts
+
+
 async def sweep_stale_ephemeral_threads(older_than_hours: float = 24.0) -> int:
     """Delete ``ephemeral-%`` threads whose newest checkpoint is older than the cutoff.
 
