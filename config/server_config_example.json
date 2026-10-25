@@ -9,6 +9,13 @@
     "platform_description": "the Whiskers Agent MCP platform"
   },
 
+  "parameters": {},
+  "terminal_relay": {
+    "step_up_method": "totp",
+    "elevation_ttl_seconds": 300,
+    "max_attempts": 3,
+    "lockout_seconds": 300
+  },
   "pagination": {
     "safe_default_page_size": 20,
     "safe_default_page_index": 1,
