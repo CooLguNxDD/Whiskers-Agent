@@ -199,9 +199,19 @@ def _prepare(body, root, tenant_id, world_id, model_id):
     return prepared
 
 
-async def index_assets(body: dict, *, tenant_id: int, world_id: str, trusted_root: Path) -> dict:
-    """Validate the entire bounded index before atomically staging desired state + durable jobs."""
+async def index_assets(body: dict, *, tenant_id: int, world_id: str, trusted_root: Path | None = None,
+                       pack_roots: dict | None = None) -> dict:
+    """Validate the entire bounded index before atomically staging desired state + durable jobs.
+
+    `version: 3` bodies are WorldGen v3 pack records (per-record errors, `pack_roots` required).
+    """
     validate_namespace(tenant_id, world_id)
+    if isinstance(body, dict) and body.get("version") == 3:
+        from plugins.world_semantic_plugin import asset_v3
+        return await asset_v3.index_pack_assets(body, tenant_id=tenant_id, world_id=world_id,
+                                                pack_roots=pack_roots or {})
+    if trusted_root is None:
+        raise ValueError("trusted ingestion root required for version 1 asset indexes")
     sel = await resolve_asset_embedding()
     model_id = embeddings_core.model_id_for(sel)
     prepared = await asyncio.to_thread(_prepare, body, trusted_root, tenant_id, world_id, model_id)
@@ -259,8 +269,16 @@ _SPEC = SearchSpec(name="world_assets", model=Asset, select_cols=(Asset.asset_id
 
 async def search_assets(query: str | None = None, *, image: dict | None = None, tenant_id: int,
                         world_id: str, kind: str | None = None, tags: list[str] | None = None,
-                        k: int = 10) -> list[dict]:
-    """Search current indexed assets; query XOR inline image, all tags must match before top-k."""
+                        k: int = 10, role: str | None = None, biome: str | None = None,
+                        licence: str | None = None, distribution: str | None = None,
+                        pack: str | None = None, max_tris: int | None = None,
+                        allow_local: bool = False, pack_roots: dict | None = None) -> list[dict]:
+    """Search current indexed assets; query XOR inline image, all tags must match before top-k.
+
+    With any v3 filter (or configured `pack_roots`) scoring is max-sim over per-view vectors
+    (`asset_v3`); otherwise the legacy single-vector path runs. `allow_local` is set by the
+    adapter from server config, never by the caller.
+    """
     validate_namespace(tenant_id, world_id)
     if (query is None) == (image is None):
         raise ValueError("supply exactly one of query or image")
@@ -269,6 +287,13 @@ async def search_assets(query: str | None = None, *, image: dict | None = None, 
     if kind is not None and (not isinstance(kind, str) or kind not in KINDS):
         raise ValueError("unsupported asset kind filter")
     tags = _labels(tags, "tags") if tags is not None else []
+    from plugins.world_semantic_plugin import asset_v3
+    v3_args = {"role": role, "biome": biome, "licence": licence, "distribution": distribution,
+               "pack": pack, "max_tris": max_tris}
+    if asset_v3.v3_engaged(v3_args, pack_roots or {}):
+        filters = asset_v3.normalize_filters(allow_local=allow_local, **v3_args)
+        return await asset_v3.search_pack_assets(query, image, tenant_id=tenant_id, world_id=world_id,
+                                                 kind=kind, tags=tags, k=k, filters=filters)
     document = EmbeddingInput(text=_string(query, "query", 8192)) if image is None else EmbeddingInput(media=await asyncio.to_thread(decode_image, image))
     sel = await resolve_asset_embedding()
     vectors = await embeddings_core.embed_multimodal_with(sel, [document])
