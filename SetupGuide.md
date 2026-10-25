@@ -12,7 +12,8 @@ This guide describes how to configure, bootstrap, and run the Whiskers Agent MCP
 4. [Restarting the Server from the TUI](#-restarting-the-server-from-the-tui)
 5. [Running on Windows Host](#-running-on-windows-host)
 6. [Key Environment Variables](#-key-environment-variables)
-7. [Additional Resources](#-additional-resources)
+7. [Single-process constraint](#-single-process-constraint)
+8. [Additional Resources](#-additional-resources)
 
 ---
 
@@ -254,6 +255,32 @@ docker exec -it whiskers-agent-server python /app/terminal/script/setup_tui.py
 - Provide a username, password, and select a role (e.g., `admin`, `user`).
 
 For more details on the multi-tenant architecture and CLI tools, refer to [MULTI_TENANT_TUI.md](./docs/MULTI_TENANT_TUI.md).
+
+---
+
+## 🧵 Single-process constraint
+
+Several server components keep their state in **process memory**, so they are correct only when the server runs as exactly one process (one uvicorn/gunicorn worker, one container replica):
+
+| Component | Where | State that is not shared |
+| :-------- | :---- | :----------------------- |
+| MCP subscription bus (`subscriptions/listen`) | `core/context/_app.py` (`InMemorySubscriptionBus`) | Subscribers and published events live in one process; a listener on worker A never sees an event raised on worker B. |
+| Rate limiter | `api/rate_limit_middleware.py` (`_hits`) | Per-IP sliding windows are per process, so N workers allow roughly N times the configured limit. |
+| Graph session locks | `core_graph/runtime/bootstrap.py` (`session_lock`) | `asyncio.Lock`s serialize turns of one `session_id` only inside one process; two workers can run the same session concurrently. |
+
+Why: the state is process-local by design, and FastMCP 4 needs shared session state across replicas, which this server does not provide. Making these components multi-process safe (for example a Redis-backed bus and limiter) is not implemented.
+
+At startup the server logs one `WARNING` per signal that indicates more than one process (it never fails startup or changes behaviour). The signals are:
+
+- environment `WEB_CONCURRENCY`, `UVICORN_WORKERS` or `GUNICORN_WORKERS` set to an integer greater than 1;
+- `deployment.replicas` or `deployment.workers` in `config/server_config.json` set to an integer greater than 1 (defaults: `1`; see `config/server_config_example.json`).
+
+Empty, non-numeric and `<= 1` values are ignored. The warning cannot see replicas created by an orchestrator (Kubernetes, Compose `scale`), so set `deployment.replicas` yourself when you scale out.
+
+Supported options:
+
+1. **Run one worker/replica** (the default and the tested setup).
+2. If you must run several, put **sticky sessions** (route by `Mcp-Session-Id` or client IP) and **rate limiting at the proxy** in front of the server, and accept that `subscriptions/listen` events only reach listeners on the same process.
 
 ---
 

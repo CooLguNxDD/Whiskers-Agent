@@ -6,7 +6,7 @@ from fastmcp import FastMCP
 
 from core.context._env import OAUTH_ENABLED, MCP_SERVER_URL, _DB_AVAILABLE
 from core.context_builder import ContextBuilder
-from utils.server_config import CONTEXT_CONFIG, PARAMETERS
+from utils.server_config import CONTEXT_CONFIG, PARAMETERS, SERVER_CONFIG
 
 logger = logging.getLogger("whiskers")
 
@@ -182,6 +182,16 @@ try:
     logger.info("MCP subscriptions/listen handler registered successfully")
 except Exception as _sub_err:
     logger.warning("Failed to register subscriptions/listen handler: %s", _sub_err)
+
+# The subscription bus above (plus the rate limiter and session locks) is process-local.
+try:
+    import os as _os
+
+    from utils.single_process_guard import detect_multi_process_config, warn_single_process_only
+
+    warn_single_process_only(detect_multi_process_config(_os.environ, SERVER_CONFIG))
+except Exception as _guard_err:  # diagnostics only; never block boot
+    logger.debug("single-process guard skipped: %s", _guard_err)
 
 if _DB_AVAILABLE and oauth_relay is None:
     from oauth.oauth_relay import ExternalOAuthRelay
