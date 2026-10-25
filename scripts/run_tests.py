@@ -18,6 +18,20 @@ from pathlib import Path
 # runtime branches below that fall back to it can't drift from each other).
 DEFAULT_TEST_PATHS = ["test/", "plugins/"]
 
+def with_failure_report(pytest_args):
+    """Append `-rfE --tb=short` unless the caller already chose them.
+
+    Gate/fix rounds read the output: the short summary lists every FAILED/ERROR
+    test id with its first error line, so a real regression can be told apart
+    from a host-load timeout. Exit codes are untouched.
+    """
+    args = list(pytest_args)
+    if not any(a.startswith("-r") and not a.startswith("--") for a in args):
+        args.append("-rfE")
+    if not any(a.startswith("--tb") for a in args):
+        args.append("--tb=short")
+    return args
+
 def is_docker_container():
     """Detect if the script is running inside a Docker container."""
     return os.path.exists("/.dockerenv") or os.path.exists("/app")
@@ -110,7 +124,7 @@ def main():
         if not pytest_args:
             pytest_args = list(DEFAULT_TEST_PATHS)
 
-        sys.exit(pytest.main(pytest_args))
+        sys.exit(pytest.main(with_failure_report(pytest_args)))
     else:
         # On Host machine: Check if the Docker container is running
         container_candidates = [
@@ -169,7 +183,7 @@ def main():
                 print("ERROR: 'pytest' not found locally on host. Run 'pip install -r requirements.txt' or start docker stack first.")
                 sys.exit(1)
                 
-            sys.exit(pytest.main(pytest_args))
+            sys.exit(pytest.main(with_failure_report(pytest_args)))
 
 if __name__ == "__main__":
     main()

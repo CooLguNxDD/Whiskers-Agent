@@ -382,7 +382,9 @@ async def test_claim_to_s01_transport_to_vector_publication_uses_immutable_media
     assert endpoint == "https://synthetic.invalid/v1/embeddings"
     assert wire["model"] == "synthetic" and wire["dimensions"] == 3
     image_parts, audio_parts = [item["content"] for item in wire["input"]]
-    assert image_parts[0] == audio_parts[0] == {"type": "text", "text": jobs[0]["payload"]["content_text"]}
+    # Text parts carry the EmbeddingGemma document task prefix (media parts never do).
+    prefixed = "title: none | text: " + jobs[0]["payload"]["content_text"]
+    assert image_parts[0] == audio_parts[0] == {"type": "text", "text": prefixed}
     assert base64.b64decode(image_parts[1]["image_url"]["url"].split(",", 1)[1]) == original_image
     assert base64.b64decode(audio_parts[1]["input_audio"]["data"]) == original_audio
     assert next(iter(db.jobs.values())).status == "done"
