@@ -9,7 +9,7 @@ The core server is domain-agnostic; domain integrations live in `plugins/`.
 - **Guardrails detail**: [.claude/skills/core.md](./.claude/skills/core.md)
 - **Setup**: [SetupGuide.md](./SetupGuide.md) · [ReadMe.md](./ReadMe.md) · [CONTRIBUTING.md](./CONTRIBUTING.md)
 - **Code Review Ignore**: generated `graphify-out/` (gitignored and dockerignored)
-- **test**: test should run on docker container (`whiskers-agent-server`; compose service `whiskers-agent`) unless it is a worktree
+- **test**: test should run on docker container (`whiskers-agent-server`; compose service `whiskers-agent`) unless it is a worktree; from a git worktree `python scripts/run_tests.py` auto-runs a throwaway container with the worktree mounted at `/app` (`WHISKERS_TEST_IMAGE`, `WHISKERS_TESTS_NETWORK`)
 ---
 
 ## 1. Architecture Guardrails (non-negotiable)
