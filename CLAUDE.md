@@ -529,6 +529,13 @@ goals/                  agent goal files / achieve() persistence
   [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
   [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
   [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
+  **WorldGen v3 pack library** (`asset_packs.py` roots/records, `asset_v3.py` ingest + scoring, plugin
+  migration `0010_asset_v3_library`, docs `docs/world-asset-library-v3.md`): `index_assets` `version: 3` bodies
+  ingest `packs/` (shared) and `packs-local/` (local) records from server `SETTINGS["asset_pack_roots"]`; one image
+  vector per view + one caption vector in `world_asset_vectors`; `search_assets` scores max-sim over views (mean
+  tie-break, then asset_id) with `role`/`biome`/`licence`/`distribution`/`pack`/`max_tris` filtered in SQL inside
+  `stores/asset_store.py`. `distribution=local` is hidden unless the namespace has a `packs-local` root and the caller
+  asks for `local`/`any`, and every outbound mirror goes through `asset_adapters.mirror_assets`, which skips and logs it.
   Offline E2E coverage is in `plugins/world_semantic_plugin/tests/test_semantic_v2_e2e.py`: registered
   tools/routes → real services → real `embedding_worker` claim/dispatch/completion, with only the provider
   and SQL session doubled (search double evaluates the real filter clauses + model space). Runs with
