@@ -21,7 +21,7 @@ This guide describes how to configure, bootstrap, and run the Whiskers Agent MCP
 
 Before starting, ensure you have the following installed on your system:
 
-- **Docker & Docker Compose** (Highly recommended for database and container services)
+- **Docker & Docker Compose >= 2.24** (Highly recommended for database and container services; `required: false` env-file syntax needs Compose 2.24 or newer)
 - **Python 3.11+** (If running locally on the Windows host)
 - **Git**
 
@@ -101,7 +101,11 @@ Running the TUIs inside the Docker container is the simplest path. The container
 
 ### Step 1: Start the Docker services
 
-Ensure your `.env` file is configured, then start the stack:
+Ensure your `.env` file is configured, then start the stack. Real deployments still require `.env`; the setup CLI scaffolds it. A missing `.env` is only a no-op for Compose configuration validation, not a supported run mode.
+
+`docker-compose.yml` uses optional `env_file` entries for fresh-worktree config validation, which requires Docker Compose >= 2.24.
+
+
 
 ```powershell
 docker compose up -d

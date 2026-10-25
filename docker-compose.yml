@@ -60,7 +60,8 @@ services:
     ports:
       - "${MCP_PORT:-10000}:${MCP_PORT:-10000}"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       # OAuth (if USERNAME/PASSWORD are empty)
       OAUTH_ENABLED: ${OAUTH_ENABLED:-}
@@ -200,7 +201,8 @@ services:
       - whiskers-network
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://host.docker.internal:10000}
       MCP_SERVER_URL: ${MCP_SERVER_URL:-http://host.docker.internal:10000}
