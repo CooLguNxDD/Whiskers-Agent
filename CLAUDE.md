@@ -604,6 +604,7 @@ python scripts/reseed.py --full            # WARNING: --full also clears seeded 
 
 # Tests
 python scripts/run_tests.py                            # pytest in Docker (testpaths: test/ + plugins/)
+#   appends `-rfE --tb=short` (unless you pass your own) so failures list test ids + first error line
 npm --prefix frontend/cat-admin-frontend run test:unit
 npm --prefix frontend/cat-admin-frontend run test:e2e
 
