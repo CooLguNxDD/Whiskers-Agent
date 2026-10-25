@@ -42,8 +42,24 @@ RowFilter = Callable[[dict], bool]
 # under-fill below top_k.  Over-fetch by this factor so enough candidates
 # survive.  Only activated when row_filter is not None → zero perf impact
 # on non-denylist paths.  Capped at _DENSE_OVERFETCH_CAP to avoid runaway.
+# Shared by the dense and sparse legs via ``_sql_limit``; the _DENSE_* names
+# stay importable, the generic aliases are the preferred spelling.
 _DENSE_OVERFETCH_FACTOR: int = 4
 _DENSE_OVERFETCH_CAP: int = 200
+OVERFETCH_FACTOR: int = _DENSE_OVERFETCH_FACTOR
+OVERFETCH_CAP: int = _DENSE_OVERFETCH_CAP
+
+
+def _sql_limit(top_k: int, row_filter: RowFilter | None) -> int:
+    """SQL LIMIT for a leg: exactly ``top_k`` without a row_filter, else over-fetched.
+
+    A Python-side ``row_filter`` runs after the SQL LIMIT, so the over-fetch lets
+    denylist-heavy results still reach ``top_k``. Reads the ``_DENSE_OVERFETCH_*``
+    names at call time so patching either spelling-source keeps working.
+    """
+    if row_filter is None:
+        return top_k
+    return min(top_k * _DENSE_OVERFETCH_FACTOR, _DENSE_OVERFETCH_CAP)
 
 # pgvector >= 0.8.0 iterative index scans: an HNSW scan normally yields only
 # ``hnsw.ef_search`` candidates *before* the WHERE (tenant_id / model) filter, so a
@@ -159,14 +175,7 @@ async def _dense(
     extra_filters: ExtraFilters | None,
     row_filter: RowFilter | None,
 ) -> list[dict]:
-    # When a Python-side row_filter is active, over-fetch at the SQL level so
-    # denylist-heavy queries still return up to top_k items after filtering.
-    # When row_filter is None the limit is exactly top_k (no change).
-    sql_limit = (
-        min(top_k * _DENSE_OVERFETCH_FACTOR, _DENSE_OVERFETCH_CAP)
-        if row_filter is not None
-        else top_k
-    )
+    sql_limit = _sql_limit(top_k, row_filter)
     async with get_async_session() as session:
         await _enable_iterative_scan(session)
         stmt = (
@@ -213,6 +222,7 @@ async def _sparse(
 ) -> list[dict]:
     if spec.search_doc_col is None:
         return []
+    sql_limit = _sql_limit(top_k, row_filter)
     async with get_async_session() as session:
         tsquery = func.websearch_to_tsquery("english", query)
         stmt = (
@@ -220,7 +230,7 @@ async def _sparse(
             .where(spec.search_doc_col.op("@@")(tsquery))
             .where(spec.model_col == model_id)
             .order_by(sa_text("similarity DESC"))
-            .limit(top_k)
+            .limit(sql_limit)
         )
         if extra_filters:
             stmt = extra_filters(stmt)
@@ -232,7 +242,8 @@ async def _sparse(
                 continue
             d["score"] = float(row.similarity)
             candidates.append(d)
-        return candidates
+        # Over-fetched rows can survive the filter beyond top_k; trim like search_by_vector.
+        return candidates[:top_k]
 
 
 async def search(
