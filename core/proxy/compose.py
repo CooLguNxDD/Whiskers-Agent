@@ -2,7 +2,6 @@
 
 import logging
 from typing import Any
-import httpx2
 
 from fastmcp import FastMCP
 from fastmcp.server import create_proxy
@@ -14,54 +13,82 @@ from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 logger = logging.getLogger("whiskers.plugins")
 
 
-class RelayAuth(httpx2.Auth):
-    """httpx2.Auth that injects a fresh token from ExternalOAuthRelay.
+_relay_auth_cls: type | None = None
 
-    FastMCP 4 / MCP SDK v2 construct the upstream client with ``httpx2``.
-    An ``httpx.Auth`` subclass is rejected as ``Invalid "auth" argument``,
-    which FastMCP's ProxyProvider swallows into a list_tools warning and
-    mounts zero namespaced tools.
 
-    A proxy is not a plugin, but gets a synthetic manifest to reuse
-    ExternalOAuthRelay.
+def _get_relay_auth_cls() -> type:
+    """Build (once) and return the ``RelayAuth`` class, importing ``httpx2`` lazily.
+
+    ``httpx2`` is only needed when a proxy actually authenticates, so keeping the
+    import (and the ``httpx2.Auth`` subclass it requires) out of module import time
+    lets ``core.proxy.compose`` -- and everything chaining through it -- import on a
+    host Python without ``httpx2``.
     """
-    requires_response_body = False
+    global _relay_auth_cls
+    if _relay_auth_cls is not None:
+        return _relay_auth_cls
 
-    def __init__(self, plugin_id: str, provider: str = "upstream", auth_header: str | None = None):
-        """Initialize RelayAuth with plugin id, provider, and custom auth header."""
-        self.plugin_id = plugin_id
-        self.provider = provider
-        self.auth_header = auth_header or "Authorization"
+    import httpx2
 
-    async def async_auth_flow(self, request: httpx2.Request):
-        """Asynchronous HTTPX auth flow to inject credentials into the request header."""
-        from core.context import oauth_relay
-        if oauth_relay is None:
-            logger.error("RelayAuth: ExternalOAuthRelay singleton not available in core.context")
-            yield request
-            return
+    class RelayAuth(httpx2.Auth):
+        """httpx2.Auth that injects a fresh token from ExternalOAuthRelay.
 
-        try:
-            token = await oauth_relay.get_token(self.plugin_id, self.provider)
-            if not token:
-                logger.error(
-                    "RelayAuth: empty token for plugin=%s provider=%s",
-                    self.plugin_id, self.provider,
-                )
-            else:
-                logger.info(
-                    "RelayAuth: attaching token plugin=%s header=%s token_len=%d",
-                    self.plugin_id, self.auth_header, len(token),
-                )
-            # Default to Authorization: Bearer <token>
-            if self.auth_header.lower() == "authorization":
-                request.headers[self.auth_header] = f"Bearer {token}"
-            else:
-                request.headers[self.auth_header] = token
-        except Exception as e:
-            logger.exception("RelayAuth: Failed to retrieve token from ExternalOAuthRelay: %s", e)
+        FastMCP 4 / MCP SDK v2 construct the upstream client with ``httpx2``.
+        An ``httpx.Auth`` subclass is rejected as ``Invalid "auth" argument``,
+        which FastMCP's ProxyProvider swallows into a list_tools warning and
+        mounts zero namespaced tools.
+
+        A proxy is not a plugin, but gets a synthetic manifest to reuse
+        ExternalOAuthRelay.
+        """
+        requires_response_body = False
+
+        def __init__(self, plugin_id: str, provider: str = "upstream", auth_header: str | None = None):
+            """Initialize RelayAuth with plugin id, provider, and custom auth header."""
+            self.plugin_id = plugin_id
+            self.provider = provider
+            self.auth_header = auth_header or "Authorization"
+
+        async def async_auth_flow(self, request: "httpx2.Request"):
+            """Asynchronous HTTPX auth flow to inject credentials into the request header."""
+            from core.context import oauth_relay
+            if oauth_relay is None:
+                logger.error("RelayAuth: ExternalOAuthRelay singleton not available in core.context")
+                yield request
+                return
+
+            try:
+                token = await oauth_relay.get_token(self.plugin_id, self.provider)
+                if not token:
+                    logger.error(
+                        "RelayAuth: empty token for plugin=%s provider=%s",
+                        self.plugin_id, self.provider,
+                    )
+                else:
+                    logger.info(
+                        "RelayAuth: attaching token plugin=%s header=%s token_len=%d",
+                        self.plugin_id, self.auth_header, len(token),
+                    )
+                # Default to Authorization: Bearer <token>
+                if self.auth_header.lower() == "authorization":
+                    request.headers[self.auth_header] = f"Bearer {token}"
+                else:
+                    request.headers[self.auth_header] = token
+            except Exception as e:
+                logger.exception("RelayAuth: Failed to retrieve token from ExternalOAuthRelay: %s", e)
         
-        yield request
+            yield request
+
+    RelayAuth.__module__ = __name__
+    _relay_auth_cls = RelayAuth
+    return RelayAuth
+
+
+def __getattr__(name: str) -> Any:
+    """PEP 562 lazy attribute: ``RelayAuth`` resolves to the cached ``httpx2.Auth`` subclass."""
+    if name == "RelayAuth":
+        return _get_relay_auth_cls()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def build_proxy(
@@ -84,7 +111,7 @@ def build_proxy(
     elif auth_mode == "oauth" and oauth_config:
         plugin_id = f"proxy_{name}"
         auth_header = oauth_config.get("auth_header") or "Authorization"
-        auth_obj = RelayAuth(plugin_id=plugin_id, provider="upstream", auth_header=auth_header)
+        auth_obj = _get_relay_auth_cls()(plugin_id=plugin_id, provider="upstream", auth_header=auth_header)
 
     if transport.lower() == "sse" or url.endswith("/sse"):
         client_transport = SSETransport(url=url, auth=auth_obj)
