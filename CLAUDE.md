@@ -278,13 +278,15 @@ utils/                  response_shape/response_format (11-step pipeline), api_u
                         theme_registry (JSON palettes → hex for SVG/TUI; SUPPORTED_THEMES)
 config/                 server_config.json, plugin_config.json, tools_api_config.json,
                         embedding_config.json (+ *_example.json)
-docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract)
+docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract),
+                        worktree-clean-check.md
 migrations/             Alembic core chain (versions/core/)
 Tools/                  tools_generator.py, semantic_tools_generator.py, migration_generator.py,
                         openapi_pipeline/ (live OpenAPI / FastAPI / Flask / Express ingest)
 terminal/               setup TUIs + scripts (setup.py, setup_tui.py, ui.py, manage_credentials.py);
                         Catppuccin rich Theme in tui/theme.py (`WHISKERS_TUI_THEME`)
-scripts/                dev.py, migrate.py, reseed.py, run_tests.py, gen_graph_topology.py,
+scripts/                dev.py, migrate.py, reseed.py, run_tests.py, check_worktree_clean.py (step-completion
+                        stray/lockfile check, see docs/worktree-clean-check.md), gen_graph_topology.py,
                         compile_notebooklm_*.py, upsert_all_*.py
 test/                   unit/ (~200 modules), integration/ (route + persistence suites)
 frontend/               cat-admin-frontend (React admin console), console
