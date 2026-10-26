@@ -27,7 +27,7 @@ _VECTOR_TYPE_RE = re.compile(r"^vector\((\d+)\)$")
 
 _COLUMN_TYPE_SQL = text(
     "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
-    "WHERE attrelid = to_regclass(:t) AND attname = 'embedding' AND NOT attisdropped"
+    "WHERE attrelid = to_regclass(:t) AND attname = 'embedding' AND NOT attisdropped LIMIT 1"
 )
 
 

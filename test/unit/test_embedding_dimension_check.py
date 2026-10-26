@@ -91,6 +91,8 @@ async def test_collect_dimension_facts_reads_widths_and_samples():
     assert columns[dc.EMBEDDING_TABLES[1]] == 1024
     assert sampled[dc.EMBEDDING_TABLES[0]] is None  # absent table is never sampled
     assert sampled[dc.EMBEDDING_TABLES[1]] == 768
+    selects = [sql for sql in session.sql if sql.lstrip().upper().startswith("SELECT")]
+    assert selects and all("LIMIT 1" in sql.upper() for sql in selects)
 
 
 # ---- doctor -----------------------------------------------------------------
