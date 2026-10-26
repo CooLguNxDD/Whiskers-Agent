@@ -109,7 +109,11 @@ _SWEEP_YIELD_EVERY = 50
 
 
 async def checkpoint_table_counts() -> dict[str, int]:
-    """Return exact row counts for the LangGraph checkpoint tables."""
+    """Return catalog row-count estimates for LangGraph checkpoint tables.
+
+    ``pg_class.reltuples`` avoids scanning ever-growing checkpoint tables on each
+    telemetry tick; estimates are refreshed by PostgreSQL's ANALYZE/autovacuum.
+    """
     await get_checkpointer()
     if _pg_pool is None:
         raise RuntimeError("checkpoint pool is unavailable")
@@ -117,7 +121,11 @@ async def checkpoint_table_counts() -> dict[str, int]:
     async with _pg_pool.connection() as conn:
         async with conn.cursor() as cur:
             for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
-                await cur.execute(f"SELECT count(*) AS row_count FROM {table}")
+                await cur.execute(
+                    "SELECT COALESCE(reltuples, 0)::bigint AS row_count "
+                    "FROM pg_class WHERE oid = to_regclass(%s)",
+                    (table,),
+                )
                 row = await cur.fetchone()
                 counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
     return counts
