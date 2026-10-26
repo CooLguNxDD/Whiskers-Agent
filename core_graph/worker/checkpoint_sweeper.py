@@ -58,16 +58,16 @@ async def _tick() -> bool:
     global _TOTAL_DELETED
     from core_graph.runtime.bootstrap import checkpoint_table_counts, sweep_stale_ephemeral_threads
     try:
-        counts = await checkpoint_table_counts()
-        _COUNTS.update(checkpoints=counts["checkpoints"], blobs=counts["checkpoint_blobs"], writes=counts["checkpoint_writes"])
-    except Exception:
-        logger.debug("checkpoint_sweeper: checkpoint count query failed", exc_info=True)
-    try:
         deleted = await sweep_stale_ephemeral_threads(older_than_hours=_stale_hours())
         _LAST_DELETED["deleted"] = int(deleted or 0)
         _TOTAL_DELETED += _LAST_DELETED["deleted"]
     except Exception:
         logger.exception("checkpoint_sweeper: tick failed")
+    try:
+        counts = await checkpoint_table_counts()
+        _COUNTS.update(checkpoints=counts["checkpoints"], blobs=counts["checkpoint_blobs"], writes=counts["checkpoint_writes"])
+    except Exception:
+        logger.debug("checkpoint_sweeper: checkpoint count query failed", exc_info=True)
     return False
 
 
@@ -88,8 +88,10 @@ def run() -> asyncio.Task:
 
 async def stop() -> None:
     """Signal the worker to exit; await completion with force-cancel fallback."""
-    await _WORKER.stop()
-    _unregister_gauges()
+    try:
+        await _WORKER.stop()
+    finally:
+        _unregister_gauges()
 
 
 def _enabled() -> bool:
