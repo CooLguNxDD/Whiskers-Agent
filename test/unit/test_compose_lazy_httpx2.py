@@ -18,6 +18,13 @@ def _restore(saved: dict) -> None:
     for m in _MODULES:
         sys.modules.pop(m, None)
     sys.modules.update(saved)
+    # Importing a child sets an attribute on its parent package; restore those
+    # references too so they agree with the restored sys.modules entries.
+    for module_name, module in saved.items():
+        parent_name, _, child_name = module_name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is not None:
+            setattr(parent, child_name, module)
 
 
 def test_imports_without_httpx2(monkeypatch):
