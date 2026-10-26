@@ -108,6 +108,32 @@ _SWEEP_BATCH_LIMIT = 500
 _SWEEP_YIELD_EVERY = 50
 
 
+async def checkpoint_table_counts() -> dict[str, int]:
+    """Return catalog row-count estimates for LangGraph checkpoint tables.
+
+    ``pg_class.reltuples`` avoids scanning ever-growing checkpoint tables on each
+    telemetry tick; estimates are refreshed by PostgreSQL's ANALYZE/autovacuum.
+    """
+    await get_checkpointer()
+    if _pg_pool is None:
+        raise RuntimeError("checkpoint pool is unavailable")
+    counts: dict[str, int] = {}
+    async with _pg_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                await cur.execute(
+                    "SELECT GREATEST(reltuples, 0)::bigint AS row_count "
+                    "FROM pg_class WHERE oid = to_regclass(%s) LIMIT 1",
+                    (table,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    counts[table] = 0
+                else:
+                    counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
+    return counts
+
+
 async def sweep_stale_ephemeral_threads(older_than_hours: float = 24.0) -> int:
     """Delete ``ephemeral-%`` threads whose newest checkpoint is older than the cutoff.
 

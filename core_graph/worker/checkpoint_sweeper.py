@@ -21,6 +21,28 @@ _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_STALE_HOURS = 24.0
 _DEFAULT_SESSION_RETENTION_DAYS = 0.0  # 0 = session sweep disabled (opt-in)
 _STOP_TIMEOUT = 10.0
+_COUNTS: dict[str, int] = {"checkpoints": 0, "blobs": 0, "writes": 0}
+_LAST_DELETED: dict[str, int] = {"deleted": 0}
+_TOTAL_DELETED = 0
+_GAUGES = {
+    "checkpoint_rows_checkpoints": lambda: _COUNTS["checkpoints"],
+    "checkpoint_rows_blobs": lambda: _COUNTS["blobs"],
+    "checkpoint_rows_writes": lambda: _COUNTS["writes"],
+    "checkpoint_sweep_last_deleted": lambda: _LAST_DELETED["deleted"],
+    "checkpoint_sweep_total_deleted": lambda: _TOTAL_DELETED,
+}
+
+
+def _register_gauges() -> None:
+    from core.telemetry.collector import collector
+    for key, provider in _GAUGES.items():
+        collector.register_gauge_provider(key, provider)
+
+
+def _unregister_gauges() -> None:
+    from core.telemetry.collector import collector
+    for key in _GAUGES:
+        collector.unregister_gauge_provider(key)
 
 
 def _interval_seconds() -> float:
@@ -46,18 +68,30 @@ def _session_retention_days() -> float:
 
 
 async def _tick() -> bool:
-    """Sweep once, then idle — each sweep is guarded so one failing never blocks the other."""
+    """Sweep once and refresh cached checkpoint metrics, then idle.
+
+    Each step is guarded so one failing never blocks the others.
+    """
+    global _TOTAL_DELETED
     from core_graph.runtime import bootstrap
+    deleted = 0
     try:
-        await bootstrap.sweep_stale_ephemeral_threads(older_than_hours=_stale_hours())
+        deleted += int(await bootstrap.sweep_stale_ephemeral_threads(older_than_hours=_stale_hours()) or 0)
     except Exception:
         logger.exception("checkpoint_sweeper: ephemeral sweep failed")
     retention_days = _session_retention_days()
     if retention_days > 0:
         try:
-            await bootstrap.sweep_stale_session_threads(retention_days=retention_days)
+            deleted += int(await bootstrap.sweep_stale_session_threads(retention_days=retention_days) or 0)
         except Exception:
             logger.exception("checkpoint_sweeper: session sweep failed")
+    _LAST_DELETED["deleted"] = deleted
+    _TOTAL_DELETED += deleted
+    try:
+        counts = await bootstrap.checkpoint_table_counts()
+        _COUNTS.update(checkpoints=counts["checkpoints"], blobs=counts["checkpoint_blobs"], writes=counts["checkpoint_writes"])
+    except Exception:
+        logger.debug("checkpoint_sweeper: checkpoint count query failed", exc_info=True)
     return False
 
 
@@ -72,12 +106,16 @@ _WORKER = BackgroundWorker(
 
 def run() -> asyncio.Task:
     """Start the worker as a background task. Idempotent while active."""
+    _register_gauges()
     return _WORKER.start()
 
 
 async def stop() -> None:
     """Signal the worker to exit; await completion with force-cancel fallback."""
-    await _WORKER.stop()
+    try:
+        await _WORKER.stop()
+    finally:
+        _unregister_gauges()
 
 
 def _enabled() -> bool:

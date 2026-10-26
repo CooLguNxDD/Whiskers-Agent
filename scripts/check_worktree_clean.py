@@ -53,14 +53,18 @@ def _norm(path: str) -> str:
 
 
 def changed_files(base: str) -> list[str]:
-    """Tracked files that differ between the merge-base of ``base``/HEAD and the working tree."""
+    """Tracked files differing from the merge-base; lockfile changes use the requested base."""
     _git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     try:
         ref = _git("merge-base", base, "HEAD").strip() or base
     except RuntimeError:
         ref = base  # unrelated histories: diff against base itself
-    out = _git("diff", "--name-only", "-z", ref)
-    return [_norm(p) for p in out.split("\0") if p]
+    # Disable rename detection so the deleted source of a renamed lockfile remains visible.
+    ordinary = _git("diff", "--no-renames", "--name-only", "-z", ref)
+    locks = _git("diff", "--no-renames", "--name-only", "-z", base)
+    paths = {_norm(p) for p in ordinary.split("\0") if p}
+    paths.update(_norm(p) for p in locks.split("\0") if p and is_lockfile(_norm(p)))
+    return sorted(paths)
 
 
 def untracked_files() -> list[str]:
@@ -123,15 +127,14 @@ def find_offenders(
     untracked = untracked_files()
     offenders: dict[str, str] = {}
     for path in tracked + untracked:
-        if is_lockfile(path):
-            if not _matches(path, allow_lock):
-                offenders[path] = "lockfile changed (pass --allow-lock to permit)"
-            continue
         reason = stray_reason(path)
         if reason:
             offenders[path] = reason
+            continue
+        if is_lockfile(path) and not _matches(path, allow_lock):
+            offenders[path] = "lockfile changed (pass --allow-lock to permit)"
     for path in untracked:
-        if path in offenders or is_lockfile(path):
+        if path in offenders:
             continue
         if not _matches(path, allow):
             offenders[path] = "untracked file not covered by --allow"
