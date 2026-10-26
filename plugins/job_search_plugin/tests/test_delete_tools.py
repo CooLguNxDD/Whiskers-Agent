@@ -334,6 +334,7 @@ def test_profile_force_real_run_cascade_counts_and_order(monkeypatch, tenant):
     assert res["status"] == "ok" and res["dry_run"] is False
     assert res["applications_deleted"] == 1 and res["embeddings_deleted"] == 3
     assert order[-1] == ("row", None)  # PDFs first, row last
+    mocks["count_profile_embeddings_scoped"].assert_not_called()  # real run reads the cascade count
     assert {k for t, k in order if t == "pdf"} == {"5/base_resume.pdf", "5/j1/resume.pdf"}
     mocks["delete_profile_scoped"].assert_awaited_once_with(5, TENANT)
     _, kwargs = mocks["find_shared_object_keys"].call_args
@@ -595,3 +596,18 @@ def test_shared_key_lookup_with_no_keys_skips_db(monkeypatch):
     monkeypatch.setattr(store, "get_async_session", no_session)
     assert run(store.find_shared_object_keys([], TENANT)) == set()
     assert run(store.find_shared_object_keys([""], TENANT)) == set()
+
+
+# --- type guards --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("key", [None, 5, b"5/a.pdf", ["5/a.pdf"]])
+def test_key_is_eligible_rejects_non_strings(key):
+    assert dt._key_is_eligible(key, 5) is False
+
+
+@pytest.mark.parametrize("bad", [{"url": 5}, {"url_hash": 5}, {"url": ["x"]}])
+def test_delete_job_liveness_non_string_args_are_invalid(monkeypatch, tenant, bad):
+    patch_store(monkeypatch)
+    res = run(dt.delete_job_liveness(**bad))
+    assert res["status"] == "error" and res["error"] == "invalid_arguments"

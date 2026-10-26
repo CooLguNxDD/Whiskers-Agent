@@ -178,9 +178,53 @@ async def test_delete_job_layout_dispatches_reference_op_via_catalog(mocks):
     args, kwargs = mocks["exec"].await_args
     assert args[:3] == (
         "job_search_plugin",
-        "list_applications_for_portfolio_job",
+        "job_search_plugin__list_applications_for_portfolio_job",
         {"portfolio_job_id": "abc123"},
     )
+
+
+def _catalog_with(known: dict):
+    """execute_operation double: only op ids in *known* resolve, others raise not_found."""
+    from core.route_registry.execute import ExecuteError
+
+    async def fake(plugin_id, operation_id, args, **kw):
+        if operation_id not in known:
+            raise ExecuteError("not_found", f"Unknown operation ({plugin_id!r}, {operation_id!r})", status=404)
+        return known[operation_id]
+
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_delete_job_layout_force_check_sees_applications_via_qualified_op(mocks):
+    # Only the qualified id is registered, as static_tool_loader._qualify does.
+    mocks["exec"].side_effect = _catalog_with(
+        {"job_search_plugin__list_applications_for_portfolio_job": {"applications": [{"id": 9}]}}
+    )
+    res = await delete_job_layout("abc123", dry_run=False)
+    assert res["status"] == "refused" and res["reason"] == "referenced_by_applications"
+    assert res["applications"] == [9] and res["reference_check"] == "ok"
+    _no_writes(mocks)
+
+
+@pytest.mark.asyncio
+async def test_delete_job_layout_falls_back_to_unqualified_op(mocks):
+    mocks["exec"].side_effect = _catalog_with(
+        {"list_applications_for_portfolio_job": {"applications": [{"id": 4}]}}
+    )
+    res = await delete_job_layout("abc123", dry_run=False)
+    assert res["status"] == "refused" and res["applications"] == [4]
+
+
+@pytest.mark.asyncio
+async def test_delete_job_layout_unknown_op_refuses_without_force(mocks):
+    mocks["exec"].side_effect = _catalog_with({})
+    res = await delete_job_layout("abc123", dry_run=False)
+    assert res["status"] == "refused" and res["reason"] == "reference_check_unavailable"
+    assert res["reference_check"] == "unavailable" and res["reference_check_reason"] == "ExecuteError"
+    _no_writes(mocks)
+    forced = await delete_job_layout("abc123", force=True, dry_run=False)
+    assert forced["status"] == "ok" and forced["reference_check"] == "unavailable"
 
 
 @pytest.mark.asyncio

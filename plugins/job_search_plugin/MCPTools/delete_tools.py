@@ -53,7 +53,7 @@ def _is_object_not_found(exc: Exception) -> bool:
 
 def _key_is_eligible(key: str, owner_profile_id: int) -> bool:
     """A key may be deleted only under its owning profile's ``{id}/`` prefix."""
-    if not key or key.startswith("/") or "\\" in key or "\x00" in key:
+    if not isinstance(key, str) or not key or key.startswith("/") or "\\" in key or "\x00" in key:
         return False
     if not key.startswith(f"{owner_profile_id}/"):
         return False
@@ -231,7 +231,9 @@ async def delete_applicant_profile(
             "dry_run": dry_run,
         }
 
-    embeddings_deleted = await store.count_profile_embeddings_scoped(profile_id, tenant_id)
+    embeddings_deleted = (
+        await store.count_profile_embeddings_scoped(profile_id, tenant_id) if dry_run else 0
+    )
     keys: list[str | None] = [profile.get("resume_object_key")]
     for a in apps:
         keys.extend([a.get("resume_object_key"), a.get("cover_letter_object_key")])
@@ -285,8 +287,8 @@ async def delete_job_liveness(
     tenant_id = require_tenant_id()
     if tenant_id is None:
         return _unauthorized()
-    url = (url or "").strip() or None
-    url_hash = (url_hash or "").strip().lower() or None
+    url = url.strip() or None if isinstance(url, str) else None
+    url_hash = url_hash.strip().lower() or None if isinstance(url_hash, str) else None
     if (url is None) == (url_hash is None):
         return {
             "status": "error",
