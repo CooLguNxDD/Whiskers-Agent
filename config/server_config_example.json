@@ -7,7 +7,13 @@
     "semantic_instructions_suffix": " Semantic search tools may be available per loaded plugin. Prefer semantic search when offered; upsert indexed content after writes. When semantic tools return no result, fall back to non-semantic tools so the user still gets a response.",
     "platform_rules": "- NEVER fabricate entity data (names, IDs, or other sensitive values).\n- If required fields are missing, return status=need_input.\n- Bulk operations require explicit confirmation.",
     "platform_description": "the Whiskers Agent MCP platform",
-    "goal_models": {}
+    "goal_models": {
+      "data_retrieval": "gemini-2.5-flash",
+      "reasoning": "claude-sonnet-4-20250514",
+      "formatting": "gemini-2.5-flash",
+      "code_execution": null,
+      "api_call": null
+    }
   },
 
   "parameters": {},
@@ -16,7 +22,7 @@
     "elevation_ttl_seconds": 300,
     "max_attempts": 3,
     "lockout_seconds": 300,
-    "terminal_host_token_ttl_seconds": 300
+    "terminal_host_token_ttl_seconds": 900
   },
   "pagination": {
     "safe_default_page_size": 20,
@@ -70,7 +76,6 @@
     "max_formatted_plugin_skills_chars": 7000,
     "elicit_keepalive_interval_s": 15,
     "envelope_budget_bytes": 450000,
-    "envelope_budget": 450000,
     "artifact_offload": {
       "enabled": true,
       "min_field_bytes": 2000,
