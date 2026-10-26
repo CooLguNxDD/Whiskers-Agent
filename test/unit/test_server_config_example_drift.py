@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "config" / "server_config_example.json"
 # Each permitted omission must remain explicit and explainable.
-ALLOWED_UNDOCUMENTED: set[str] = set()
+ALLOWED_UNDOCUMENTED: set[str] = {"graph.envelope_budget"}  # legacy alias; envelope_budget_bytes takes precedence.
 CONFIG_ALIASES = {
     "PAGINATION_CONFIG": ("pagination",), "CONTEXT_CONFIG": ("context",),
     "PARAMETERS": ("parameters",), "OAUTH_CONFIG": ("oauth",),
@@ -73,7 +73,7 @@ def path_exists(config: dict, path: str) -> bool:
 
 
 def missing_config_paths(reads: set[str], example: dict) -> set[str]:
-    """Return config reads absent from the example, excluding documented exceptions."""
+    """Return config reads absent from the example."""
     return {path for path in reads if not path_exists(example, path)}
 
 
