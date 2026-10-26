@@ -72,6 +72,34 @@ async def test_checkpoint_table_counts_uses_catalog_estimates(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_table_counts_clamps_unanalyzed_and_missing_tables(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    class Cursor:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return False
+        async def execute(self, sql, params=None):
+            assert "GREATEST(reltuples, 0)" in sql
+        async def fetchone(self): return None
+
+    class Conn:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *args): return False
+        def cursor(self): return Cursor()
+
+    class Pool:
+        def connection(self): return Conn()
+
+    monkeypatch.setattr(bootstrap, "get_checkpointer", AsyncMock())
+    monkeypatch.setattr(bootstrap, "_pg_pool", Pool())
+    # reltuples=-1 is clamped by SQL; a missing table has no catalog row.
+    # Both represent an estimate of zero to telemetry.
+    assert await bootstrap.checkpoint_table_counts() == {
+        "checkpoints": 0, "checkpoint_blobs": 0, "checkpoint_writes": 0
+    }
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_table_counts_requires_pool(monkeypatch):
     from unittest.mock import AsyncMock
     monkeypatch.setattr(bootstrap, "get_checkpointer", AsyncMock())

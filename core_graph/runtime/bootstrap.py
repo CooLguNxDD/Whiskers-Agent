@@ -122,12 +122,15 @@ async def checkpoint_table_counts() -> dict[str, int]:
         async with conn.cursor() as cur:
             for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
                 await cur.execute(
-                    "SELECT COALESCE(reltuples, 0)::bigint AS row_count "
-                    "FROM pg_class WHERE oid = to_regclass(%s)",
+                    "SELECT GREATEST(reltuples, 0)::bigint AS row_count "
+                    "FROM pg_class WHERE oid = to_regclass(%s) LIMIT 1",
                     (table,),
                 )
                 row = await cur.fetchone()
-                counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
+                if row is None:
+                    counts[table] = 0
+                else:
+                    counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
     return counts
 
 
