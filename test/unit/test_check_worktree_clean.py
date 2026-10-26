@@ -147,7 +147,7 @@ def test_untracked_lockfile_requires_allow_and_allow_lock(repo):
     assert _run(repo, "--allow-lock", "new/package-lock.json", "--allow", "new/*").returncode == 0
 
 
-def test_git_mv_lockfile_is_reported_without_allow_lock(repo):
+def test_git_mv_rename_of_lockfile_is_reported_without_allow_lock(repo):
     _git(repo, "mv", "package-lock.json", "ordinary.json")
     r = _run(repo)
     assert r.returncode == 1
