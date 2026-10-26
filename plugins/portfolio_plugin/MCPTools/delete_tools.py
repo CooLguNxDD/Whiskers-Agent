@@ -97,17 +97,32 @@ async def delete_project(slug: str, dry_run: bool = True) -> dict[str, Any]:
         return {"status": "error", "error": "delete_failed", "dry_run": bool(dry_run)}
 
 
+# ``static_tool_loader._qualify`` registers ``@mcp.tool`` ops as ``<plugin_id>__<name>``.
+_JOB_SEARCH_PLUGIN = "job_search_plugin"
+_JOB_APPS_OP = "list_applications_for_portfolio_job"
+_JOB_APPS_OP_QUALIFIED = "job_search_plugin__list_applications_for_portfolio_job"
+
+
 async def _portfolio_job_applications(short_id: str) -> tuple[list[dict] | None, str | None]:
     """Applications referencing *short_id* via catalog dispatch; ``(None, why)`` if unavailable."""
     try:
-        from core.route_registry.execute import execute_operation
+        from core.route_registry.execute import ExecuteError, execute_operation
 
-        out = await execute_operation(
-            "job_search_plugin",
-            "list_applications_for_portfolio_job",
-            {"portfolio_job_id": short_id},
-            caller_scopes=None,  # trusted-local, same as discovery.sources.invoke_proxy
-        )
+        args = {"portfolio_job_id": short_id}
+        try:
+            out = await execute_operation(
+                _JOB_SEARCH_PLUGIN,
+                _JOB_APPS_OP_QUALIFIED,
+                args,
+                caller_scopes=None,  # trusted-local, same as discovery.sources.invoke_proxy
+            )
+        except ExecuteError as exc:
+            if exc.code != "not_found":
+                raise
+            # Unqualified fallback for a catalog that registers the bare name.
+            out = await execute_operation(
+                _JOB_SEARCH_PLUGIN, _JOB_APPS_OP, args, caller_scopes=None
+            )
     except Exception as exc:
         return None, type(exc).__name__
     if isinstance(out, dict) and "applications" not in out and isinstance(out.get("data"), dict):

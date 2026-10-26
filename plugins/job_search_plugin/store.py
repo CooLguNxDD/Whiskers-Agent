@@ -709,14 +709,21 @@ async def delete_profile_scoped(profile_id: int, tenant_id: int) -> dict:
         apps = (
             await session.execute(
                 select(func.count(JobApplication.id)).where(
-                    JobApplication.applicant_profile_id == profile_id
+                    JobApplication.applicant_profile_id == profile_id,
+                    JobApplication.tenant_id == tenant_id,
                 )
             )
         ).scalar_one()
         embeddings = (
             await session.execute(
-                select(func.count(JobPreferenceEmbedding.id)).where(
-                    JobPreferenceEmbedding.applicant_profile_id == profile_id
+                select(func.count(JobPreferenceEmbedding.id))
+                .join(
+                    JobApplicantProfile,
+                    JobApplicantProfile.id == JobPreferenceEmbedding.applicant_profile_id,
+                )
+                .where(
+                    JobPreferenceEmbedding.applicant_profile_id == profile_id,
+                    JobApplicantProfile.tenant_id == tenant_id,
                 )
             )
         ).scalar_one()
