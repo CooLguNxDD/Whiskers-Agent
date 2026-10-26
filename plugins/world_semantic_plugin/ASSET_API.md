@@ -181,3 +181,136 @@ can wait longer behind other claims, but generation guards ensure a recovered
 incarnation cannot be clobbered by delayed work. Generic route/unity job lease
 behaviour is unchanged. All verification uses synthetic files and mocked database/model transport with
 network disabled, not a claim of live provider/DB/Unity integration.
+
+---
+
+# WorldGen v3 asset library (S11)
+
+`index_assets` / `search_assets` (same tool names) also serve WorldGen v3 pack folders.
+The pack format is owned by WorldGenEngineV3; this plugin only **consumes** it. Assumptions
+made here: a pack is a folder `<root>/<pack_id>/` whose records carry a pack-computed
+`content_hash`, frozen tags, a triangle count and one preview image per view.
+The v1 craft-v3 contract above is unchanged and keeps working.
+
+## Pack roots and distribution
+
+Server-side config (never request data), next to `asset_ingestion_roots`:
+
+```json
+"asset_pack_roots": {"<tenant int>": {"<world>": {"packs": "<dir>", "packs-local": "<dir>"}}}
+```
+
+| root name | default `distribution` | meaning |
+|---|---|---|
+| `packs` | `shared` | shareable packs |
+| `packs-local` | `local` | local-only packs; **never mirrored** |
+
+Only those two names are accepted; each must be an existing directory. Views resolve to
+`<root>/<pack_id>/<view path>`; absolute paths, `..`, backslashes, drives and any symlink that
+resolves outside the root/pack are rejected (per record). A `packs-local` record can never be
+`shared` (rejected); a `packs` record may declare the stricter `local`. A tenant/world is
+**local-capable** only when it has a `packs-local` root configured.
+
+## `index_assets` (version 3)
+
+Request (MCP `index` argument, or the body of `POST /api/world/none/{world_id}/assets/index`):
+
+```json
+{"version": 3, "root": "packs", "assets": [{
+  "asset_id": "forest-pack/props/oak.glb",
+  "pack_id": "forest-pack",
+  "content_hash": "3f9a5c1e0b7d4a62",
+  "tags": {"role": "tree", "biome": "forest", "licence": "CC0", "free": ["oak", "tall"]},
+  "distribution": "shared",
+  "tri_count": 1800,
+  "views": ["previews/oak_front.png", "previews/oak_side.png"],
+  "caption": "A tall oak tree with a wide canopy",
+  "kind": "prop"}]}
+```
+
+- `root` (required): `packs` or `packs-local`. Limits: 32 records per batch, 8 views per
+  record, 10 MB per view, 24 MB of views per batch, `asset_id` at most 128 characters.
+- `asset_id` = `<pack_id>/<rel_path>` (must start with `pack_id/`); `content_hash` is 8-128
+  characters of `[A-Za-z0-9:_.-]`; `tags.role|biome|licence` are required strings, `tags.free`
+  an optional list; `tri_count` a nonnegative integer; `kind` defaults to `prop`
+  (`prop|block|texture|stamp`); `distribution` is optional (the root default applies);
+  `views` are PNG/JPEG paths (at least one view or a `caption`); `caption` is optional.
+- **content_hash semantics**: identity is `content_hash` + tenant/world + `asset_id` +
+  `provider:model:dims`. The same hash for the same asset under the same vector identity is a
+  **no-op** (no re-embed, no new job). A changed hash (or a changed model identity) re-embeds
+  and replaces *only that asset's* vectors; the old ones are deleted when the change is staged,
+  so the asset is not searchable until the new vectors are published.
+- **Malformed records are isolated**: the batch continues and each bad record yields an
+  `errors[]` entry. A malformed *envelope* (wrong version, unknown or unconfigured root,
+  `assets` not a list, more than 32 records) rejects the whole call as `invalid_asset_input`
+  (HTTP 400).
+
+Response (`202` while work is queued, `200` when everything is already indexed):
+
+```json
+{"status": "enqueued", "enqueued": 1, "pending": 0, "indexed": 0, "warnings": [],
+ "errors": [{"index": 1, "asset_id": "forest-pack/props/bad.glb",
+             "error": "tri_count must be a nonnegative integer"}]}
+```
+
+Embedding runs in the existing asset worker consumer (same queue identity as v1). Per asset it
+embeds **one image vector per view** (images carry no text, so no prefix) and **one caption
+vector** (the caption uses the EmbeddingGemma *document* prefix), in Semaphore-bounded chunks
+through the shared S01-S03 `embed_multimodal_with` client. Every vector is L2-normalised and
+stored in `world_asset_vectors`, keyed `(tenant_id, world_id, asset_id, vector_kind, view_idx)`
+with its `provider:model:dims` identity; vectors of another identity are never mixed into
+scoring (S03 owns re-indexing old vectors). A failed embedding leaves no vectors and is retried
+by re-ingesting.
+
+## `search_assets` scoring and filters
+
+```json
+{"query": "tall oak", "k": 5, "role": "tree", "biome": "forest", "licence": "CC0",
+ "distribution": "shared", "pack": "forest-pack", "max_tris": 5000}
+```
+
+(MCP: the same names as tool parameters; HTTP: `POST .../assets/search`.) A text `query` is
+embedded as a **query** (`task: search result | query: ` prefix); an inline image query gets
+no prefix.
+
+**Scoring rule (max-sim):** an asset's score is the **maximum cosine similarity over its view
+vectors, the caption vector counting as one more view**. Ties are broken by the **mean** cosine
+over the same vectors, then results are ordered deterministically by
+`(score desc, mean_score desc, asset_id asc)`. A v1 asset's single vector counts as one view.
+
+```json
+{"status": "ok", "assets": [{"asset_id": "forest-pack/props/oak.glb", "score": 0.91,
+  "mean_score": 0.74, "metadata": {"kind": "prop", "pack_id": "forest-pack", "role": "tree",
+  "biome": "forest", "licence": "CC0", "tri_count": 1800, "distribution": "shared",
+  "tags": ["oak", "tall"], "views": ["previews/oak_front.png"], "caption": "..."}}]}
+```
+
+Filters are applied **in SQL inside `stores/asset_store.py`** (never post-filtered after a fixed
+top-k): `role`, `biome`, `licence`, `pack` (exact match), `max_tris` (`tri_count <= n`; assets
+without a `tri_count` are excluded), `distribution`, plus the existing `kind` / `tags`.
+`tenant_id` (and `world_id`, vector identity, `status = indexed`) always filter.
+v3 scoring runs when any v3 filter is supplied or the namespace has `asset_pack_roots`;
+otherwise the legacy single-vector path runs unchanged.
+
+**Distribution rules.** `distribution` defaults to `shared`. `local` and `any` are honoured
+only for a local-capable tenant/world; otherwise the call fails with `scope_or_tenant_denied`
+(HTTP 403 / `PermissionError`). A default (shared) listing therefore never contains local
+assets. `distribution=local` assets are **never mirrored**: every outbound
+mirror/sync/export/publish path must go through
+`asset_adapters.mirror_assets(assets, sink, tenant_id=, world_id=)`, which skips (and logs
+`asset mirror skipped local asset ...`) any asset whose metadata `distribution` is not exactly
+`shared` (unknown or malformed fails closed) and never calls the sink for it.
+
+## Errors
+
+The HTTP/MCP error shape is unchanged: `{"status":"error","error":"<code>"}` with
+`authentication_required` (401), `scope_or_tenant_denied` (403), `invalid_asset_input` (400),
+`payload_too_large` (413), `asset_service_failed` (503). Per-record ingest errors live in
+`errors[]` of a successful response, not in the error shape.
+
+## Migration
+
+Plugin migration `0010_asset_v3_library.py` (idempotent, guarded by the `core_051` table check)
+adds `pack_id`, `distribution`, `tri_count`, `role`, `biome`, `licence` to
+`world_asset_embeddings` and creates `world_asset_vectors`. Select it by full revision id
+`0010_asset_v3_library` (a different `0010` revision, `0010_world_tenant_owner`, also exists).

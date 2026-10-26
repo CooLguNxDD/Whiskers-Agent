@@ -14,6 +14,7 @@ hardcode the fusion key to ``(plugin_id, operation_id)``.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Hashable, Sequence
 
@@ -31,6 +32,8 @@ from utils.server_config import (
     HYBRID_SPARSE_TOP_N,
 )
 
+logger = logging.getLogger("whiskers.db_layer.embeddings.search_engine")
+
 ExtraFilters = Callable[[Any], Any]  # Select -> Select
 RowFilter = Callable[[dict], bool]
 
@@ -39,8 +42,65 @@ RowFilter = Callable[[dict], bool]
 # under-fill below top_k.  Over-fetch by this factor so enough candidates
 # survive.  Only activated when row_filter is not None → zero perf impact
 # on non-denylist paths.  Capped at _DENSE_OVERFETCH_CAP to avoid runaway.
+# Shared by the dense and sparse legs via ``_sql_limit``; the _DENSE_* names
+# stay importable, the generic aliases are the preferred spelling.
 _DENSE_OVERFETCH_FACTOR: int = 4
 _DENSE_OVERFETCH_CAP: int = 200
+OVERFETCH_FACTOR: int = _DENSE_OVERFETCH_FACTOR
+OVERFETCH_CAP: int = _DENSE_OVERFETCH_CAP
+
+
+def _sql_limit(top_k: int, row_filter: RowFilter | None) -> int:
+    """SQL LIMIT for a leg: exactly ``top_k`` without a row_filter, else over-fetched.
+
+    A Python-side ``row_filter`` runs after the SQL LIMIT, so the over-fetch lets
+    denylist-heavy results still reach ``top_k``. Reads the ``_DENSE_OVERFETCH_*``
+    names at call time so patching either spelling-source keeps working.
+    """
+    if row_filter is None:
+        return top_k
+    return min(top_k * _DENSE_OVERFETCH_FACTOR, _DENSE_OVERFETCH_CAP)
+
+# pgvector >= 0.8.0 iterative index scans: an HNSW scan normally yields only
+# ``hnsw.ef_search`` candidates *before* the WHERE (tenant_id / model) filter, so a
+# small tenant sharing the table with big ones can get < top_k rows. Iterative scan
+# keeps scanning until enough rows survive the filter. ``relaxed_order`` (faster than
+# ``strict_order``) may return rows slightly out of distance order; ``_dense`` re-sorts
+# by similarity in Python so callers still see best-first.
+HNSW_ITERATIVE_SCAN_MODE: str = "relaxed_order"
+# Caps a runaway scan (pgvector default is 20000).
+HNSW_MAX_SCAN_TUPLES: int = 20000
+
+_iterative_scan_warned: bool = False
+
+
+async def _enable_iterative_scan(session: Any) -> None:
+    """Turn on HNSW iterative scans for the session's current transaction.
+
+    ``set_config(..., true)`` is ``SET LOCAL``: it dies with the transaction, so it
+    cannot leak to other users of the pooled connection. It runs inside a SAVEPOINT
+    (``begin_nested``) because pgvector < 0.8 rejects the unknown ``hnsw.*`` GUC and
+    an error would otherwise abort the whole transaction; the savepoint rolls back
+    and the plain query still runs. Search never fails because of this setting.
+    """
+    global _iterative_scan_warned
+    try:
+        async with session.begin_nested():
+            await session.execute(
+                sa_text(
+                    "SELECT set_config('hnsw.iterative_scan', :mode, true), "
+                    "set_config('hnsw.max_scan_tuples', :max_tuples, true)"
+                ),
+                {"mode": HNSW_ITERATIVE_SCAN_MODE, "max_tuples": str(HNSW_MAX_SCAN_TUPLES)},
+            )
+    except Exception as exc:  # noqa: BLE001 - any failure must degrade to the plain query
+        if not _iterative_scan_warned:
+            _iterative_scan_warned = True
+            logger.warning(
+                "hnsw.iterative_scan unavailable (pgvector < 0.8 or no HNSW support); "
+                "tenant-filtered dense search may under-fill top_k: %s",
+                exc,
+            )
 
 
 def rrf_fuse(dense: list[dict], sparse: list[dict], key_fn: Callable[[dict], Hashable], k: int = 60) -> list[dict]:
@@ -115,15 +175,9 @@ async def _dense(
     extra_filters: ExtraFilters | None,
     row_filter: RowFilter | None,
 ) -> list[dict]:
-    # When a Python-side row_filter is active, over-fetch at the SQL level so
-    # denylist-heavy queries still return up to top_k items after filtering.
-    # When row_filter is None the limit is exactly top_k (no change).
-    sql_limit = (
-        min(top_k * _DENSE_OVERFETCH_FACTOR, _DENSE_OVERFETCH_CAP)
-        if row_filter is not None
-        else top_k
-    )
+    sql_limit = _sql_limit(top_k, row_filter)
     async with get_async_session() as session:
+        await _enable_iterative_scan(session)
         stmt = (
             select(*spec.select_cols, (1 - spec.embedding_col.cosine_distance(vector)).label("similarity"))
             .where(spec.embedding_col.is_not(None))
@@ -141,6 +195,8 @@ async def _dense(
                 continue
             d["score"] = float(row.similarity)
             candidates.append(d)
+        # relaxed_order iterative scans can emit rows slightly out of order.
+        candidates.sort(key=lambda c: c["score"], reverse=True)
         return candidates
 
 
@@ -166,6 +222,7 @@ async def _sparse(
 ) -> list[dict]:
     if spec.search_doc_col is None:
         return []
+    sql_limit = _sql_limit(top_k, row_filter)
     async with get_async_session() as session:
         tsquery = func.websearch_to_tsquery("english", query)
         stmt = (
@@ -173,7 +230,7 @@ async def _sparse(
             .where(spec.search_doc_col.op("@@")(tsquery))
             .where(spec.model_col == model_id)
             .order_by(sa_text("similarity DESC"))
-            .limit(top_k)
+            .limit(sql_limit)
         )
         if extra_filters:
             stmt = extra_filters(stmt)
@@ -185,7 +242,8 @@ async def _sparse(
                 continue
             d["score"] = float(row.similarity)
             candidates.append(d)
-        return candidates
+        # Over-fetched rows can survive the filter beyond top_k; trim like search_by_vector.
+        return candidates[:top_k]
 
 
 async def search(

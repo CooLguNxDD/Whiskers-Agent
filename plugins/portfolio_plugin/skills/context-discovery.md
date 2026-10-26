@@ -7,6 +7,14 @@ triggers: [discover, reindex, index github, refresh inventory]
 
 # Context discovery — portfolio indexing
 
+## Destructive cleanup
+
+`delete_project(slug)`, `delete_job_layout(short_id, force=False)` and
+`delete_bake_runs(run_id|older_than_days)` are operator-only, dry-run-first MCP tools.
+They require `group:portfolio_plugin:delete`, are GOAP-hidden, and always use the
+principal tenant (NULL-tenant rows are not matched). Layout deletion refuses linked
+applications unless forced; project deletion may be undone by a later GitHub reconcile.
+
 ## When to use
 
 - Operator wants to **discover** GitHub/Notion project context into the semantic index.

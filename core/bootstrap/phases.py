@@ -121,6 +121,26 @@ async def phase_4_verify_graph(ctx: BootContext):
 
 
 
+async def phase_embedding_dimension_check(ctx: BootContext) -> None:
+    """Non-fatal health log: EMBED_DIMENSIONS vs pgvector column width / a stored vector."""
+    if not ctx.db_available:
+        logger.info("Phase embedding-dimension-check: skipped (DATABASE_URL not available)")
+        return
+    try:
+        from db_layer.embeddings import dimension_check
+
+        issues = await dimension_check.run_dimension_check()
+        for issue in issues:
+            logger.warning(
+                "Phase embedding-dimension-check: %s — re-embed with scripts/reindex_embeddings.py",
+                issue.message,
+            )
+        if not issues:
+            logger.info("Phase embedding-dimension-check: OK")
+    except Exception as exc:
+        logger.warning("Phase embedding-dimension-check: skipped (%s)", exc)
+
+
 async def phase_5_finalize(ctx: BootContext):
     """Phase 5: Tool visibility, scheduler, and startup log banner."""
     if ctx.db_available:
@@ -395,6 +415,7 @@ PHASES: List[Phase] = [
     Phase(name="scope-health", run=phase_scope_health, fatal=False),
     Phase(name="Phase 3: Route Embedding Indexing", run=phase_3_index_routes, fatal=False),
     Phase(name="Phase 4: LangGraph Readiness Verification", run=phase_4_verify_graph, fatal=False),
+    Phase(name="embedding-dimension-check", run=phase_embedding_dimension_check, fatal=False),
     Phase(name="Phase 5: Apply Tool Exposure & Start Scheduler & Logging", run=phase_5_finalize, fatal=False),
     Phase(name="Phase 6: Cross-Process Registry Sync", run=phase_6_registry_sync, fatal=False),
 ]

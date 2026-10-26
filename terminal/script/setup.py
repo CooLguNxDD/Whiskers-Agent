@@ -104,6 +104,23 @@ def _db_reachability() -> tuple[bool, str]:
         return False, f"{host}:{port} unreachable ({exc})"
 
 
+def _embedding_dimensions_check(db_ok: bool) -> dict:
+    """Warn when EMBED_DIMENSIONS disagrees with pgvector columns or a stored vector; never raises."""
+    if not db_ok:
+        return {"ok": True, "detail": "db unreachable, skipped"}
+    try:
+        import asyncio
+
+        from db_layer.embeddings import dimension_check
+
+        issues = asyncio.run(dimension_check.run_dimension_check())
+    except Exception as exc:
+        return {"ok": True, "detail": f"skipped ({type(exc).__name__}: {exc})"}
+    if not issues:
+        return {"ok": True, "detail": "configured width matches stored vectors"}
+    return {"ok": False, "detail": "; ".join(i.message for i in issues)}
+
+
 def check_prerequisites() -> dict:
     """Return prerequisite check results keyed by check name."""
     root = _repo_root()
@@ -191,6 +208,7 @@ def check_prerequisites() -> dict:
         "config_files": {"ok": config_ok, "detail": config_detail},
         "master_key": {"ok": mk_ok, "detail": mk_detail},
         "db_reachable": {"ok": db_ok, "detail": db_detail},
+        "embedding_dimensions": _embedding_dimensions_check(db_ok),
         **port_results,
     }
 
@@ -200,6 +218,7 @@ _OPTIONAL_CHECKS = frozenset({
     "psql",
     "config_files",
     "db_reachable",
+    "embedding_dimensions",
     "port_mcp",
     "port_postgres",
     "port_frontend",
@@ -215,6 +234,8 @@ def run_doctor() -> int:
         print(f"  {marker} {name}: {result['detail']}")
         if name in _OPTIONAL_CHECKS and not result["ok"]:
             print(f"    warning: {name} is optional but not satisfied")
+            if name == "embedding_dimensions":
+                print("    hint: re-embed with scripts/reindex_embeddings.py (see docs/embedding-reindex.md)")
         elif name not in _OPTIONAL_CHECKS and not result["ok"]:
             required_ok = False
             if name == "docker_daemon":

@@ -159,3 +159,258 @@ async def test_sweep_yields_every_n_deletes(monkeypatch):
 
     assert swept == len(rows)
     assert sleep_calls["n"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Session-thread retention sweep (opt-in, never touches in-use conversations)
+# ---------------------------------------------------------------------------
+
+
+class _SessionSaver:
+    """Saver double: records deletes; ``aget_tuple`` exposes pending writes per thread."""
+
+    def __init__(self, pending=None, fail_get=()):
+        self.deleted = []
+        self._pending = pending or {}
+        self._fail_get = set(fail_get)
+
+    async def adelete_thread(self, thread_id):
+        self.deleted.append(thread_id)
+
+    async def aget_tuple(self, config):
+        thread_id = config["configurable"]["thread_id"]
+        if thread_id in self._fail_get:
+            raise RuntimeError("read failed")
+        writes = self._pending.get(thread_id)
+        if writes is None:
+            return None
+        return MagicMock(pending_writes=writes)
+
+
+def _patch_session_sweep(monkeypatch, rows, saver=None, locks=None):
+    saver = saver or _SessionSaver()
+    pool = _FakePool(rows)
+    monkeypatch.setattr(bootstrap, "get_checkpointer", AsyncMock(return_value=saver))
+    monkeypatch.setattr(bootstrap, "_pg_pool", pool)
+    monkeypatch.setattr(bootstrap, "_session_locks", locks if locks is not None else {})
+    return saver, pool
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_deletes_stale_session_thread(monkeypatch):
+    saver, _ = _patch_session_sweep(monkeypatch, [{"thread_id": "sess-old"}])
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 1
+    assert saver.deleted == ["sess-old"]
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_keeps_fresh_session_thread(monkeypatch):
+    """Freshness is decided in SQL (HAVING MAX(ts) < cutoff): a fresh thread is
+    never returned by the query, so it is never deleted."""
+    saver, pool = _patch_session_sweep(monkeypatch, [])
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 0
+    assert saver.deleted == []
+    sql, params = pool.last_conn.last_cursor.executed
+    assert "HAVING MAX((checkpoint->>'ts')::timestamptz)" in sql
+    assert params == (30, bootstrap._SWEEP_BATCH_LIMIT)
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_sql_excludes_ephemeral_threads(monkeypatch):
+    _, pool = _patch_session_sweep(monkeypatch, [])
+
+    await bootstrap.sweep_stale_session_threads(retention_days=7)
+
+    sql, _params = pool.last_conn.last_cursor.executed
+    assert "NOT LIKE 'ephemeral-%%'" in sql
+    assert "LIMIT" in sql
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_does_not_touch_ephemeral_rows_even_if_returned(monkeypatch):
+    """Defence in depth: an ephemeral id slipping past the query is still skipped."""
+    saver, _ = _patch_session_sweep(
+        monkeypatch, [{"thread_id": "ephemeral-x"}, {"thread_id": "sess-old"}]
+    )
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 1
+    assert saver.deleted == ["sess-old"]
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_skips_thread_with_pending_interrupt(monkeypatch):
+    saver = _SessionSaver(
+        pending={
+            "sess-paused": [("task-1", "__interrupt__", {"value": "approve?"})],
+            "sess-idle": [("task-2", "messages", [])],
+        }
+    )
+    _patch_session_sweep(
+        monkeypatch,
+        [{"thread_id": "sess-paused"}, {"thread_id": "sess-idle"}],
+        saver=saver,
+    )
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 1
+    assert saver.deleted == ["sess-idle"]
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_skips_thread_when_interrupt_check_fails(monkeypatch):
+    """Cannot prove the thread is not paused -> leave it for the next tick."""
+    saver = _SessionSaver(fail_get={"sess-flaky"})
+    _patch_session_sweep(monkeypatch, [{"thread_id": "sess-flaky"}], saver=saver)
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 0
+    assert saver.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_skips_thread_with_held_session_lock(monkeypatch):
+    import asyncio
+
+    held = asyncio.Lock()
+    await held.acquire()
+    free = asyncio.Lock()
+    saver, _ = _patch_session_sweep(
+        monkeypatch,
+        [{"thread_id": "sess-busy"}, {"thread_id": "sess-free"}],
+        locks={"sess-busy": held, "sess-free": free},
+    )
+
+    swept = await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert swept == 1
+    assert saver.deleted == ["sess-free"]
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_does_not_create_lock_entries(monkeypatch):
+    locks: dict = {}
+    _patch_session_sweep(monkeypatch, [{"thread_id": "sess-old"}], locks=locks)
+
+    await bootstrap.sweep_stale_session_threads(retention_days=30)
+
+    assert locks == {}
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_noop_for_non_positive_retention(monkeypatch):
+    saver, pool = _patch_session_sweep(monkeypatch, [{"thread_id": "sess-old"}])
+
+    assert await bootstrap.sweep_stale_session_threads(retention_days=0) == 0
+    assert await bootstrap.sweep_stale_session_threads(retention_days=-3) == 0
+
+    assert pool.last_conn is None
+    assert saver.deleted == []
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_noop_when_no_checkpointer(monkeypatch):
+    monkeypatch.setattr(bootstrap, "get_checkpointer", AsyncMock(return_value=None))
+    assert await bootstrap.sweep_stale_session_threads(retention_days=30) == 0
+
+
+@pytest.mark.asyncio
+async def test_session_sweep_swallows_query_errors(monkeypatch):
+    class _BoomPool:
+        def connection(self):
+            raise RuntimeError("db down")
+
+    monkeypatch.setattr(bootstrap, "get_checkpointer", AsyncMock(return_value=_SessionSaver()))
+    monkeypatch.setattr(bootstrap, "_pg_pool", _BoomPool())
+    assert await bootstrap.sweep_stale_session_threads(retention_days=30) == 0
+
+
+# --- worker wiring ---------------------------------------------------------
+
+
+def _patch_scheduled(monkeypatch, cfg):
+    import utils.server_config as server_config
+
+    monkeypatch.setattr(server_config, "SCHEDULED_JOBS_CONFIG", {"checkpoint_sweep": cfg})
+
+
+def test_session_retention_days_defaults_to_disabled(monkeypatch):
+    import core_graph.worker.checkpoint_sweeper as cs
+
+    _patch_scheduled(monkeypatch, {})
+    assert cs._session_retention_days() == 0.0
+    _patch_scheduled(monkeypatch, {"session_retention_days": "junk"})
+    assert cs._session_retention_days() == 0.0
+    _patch_scheduled(monkeypatch, {"session_retention_days": 14})
+    assert cs._session_retention_days() == 14.0
+
+
+@pytest.mark.asyncio
+async def test_tick_runs_no_session_sweep_when_retention_zero(monkeypatch):
+    import core_graph.worker.checkpoint_sweeper as cs
+
+    _patch_scheduled(monkeypatch, {"session_retention_days": 0})
+    eph = AsyncMock(return_value=0)
+    sess = AsyncMock(return_value=0)
+    monkeypatch.setattr(bootstrap, "sweep_stale_ephemeral_threads", eph)
+    monkeypatch.setattr(bootstrap, "sweep_stale_session_threads", sess)
+
+    assert await cs._tick() is False
+
+    eph.assert_awaited_once()
+    sess.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tick_runs_session_sweep_after_ephemeral(monkeypatch):
+    import core_graph.worker.checkpoint_sweeper as cs
+
+    _patch_scheduled(monkeypatch, {"session_retention_days": 30})
+    order = []
+
+    async def eph(**kw):
+        order.append("eph")
+        return 0
+
+    async def sess(**kw):
+        order.append(("sess", kw["retention_days"]))
+        return 0
+
+    monkeypatch.setattr(bootstrap, "sweep_stale_ephemeral_threads", eph)
+    monkeypatch.setattr(bootstrap, "sweep_stale_session_threads", sess)
+
+    await cs._tick()
+
+    assert order == ["eph", ("sess", 30.0)]
+
+
+@pytest.mark.asyncio
+async def test_tick_failures_do_not_block_each_other(monkeypatch):
+    import core_graph.worker.checkpoint_sweeper as cs
+
+    _patch_scheduled(monkeypatch, {"session_retention_days": 30})
+    sess = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        bootstrap, "sweep_stale_ephemeral_threads", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    monkeypatch.setattr(bootstrap, "sweep_stale_session_threads", sess)
+
+    assert await cs._tick() is False
+    sess.assert_awaited_once()
+
+    eph = AsyncMock(return_value=0)
+    monkeypatch.setattr(bootstrap, "sweep_stale_ephemeral_threads", eph)
+    monkeypatch.setattr(
+        bootstrap, "sweep_stale_session_threads", AsyncMock(side_effect=RuntimeError("boom"))
+    )
+    assert await cs._tick() is False
+    eph.assert_awaited_once()

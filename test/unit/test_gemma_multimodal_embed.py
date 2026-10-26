@@ -22,6 +22,8 @@ def selection():
         "provider": "gemma-multimodal", "model": "test-multimodal-alias",
         "dimensions": 3, "base_url": "https://gateway.example.invalid/v1",
         "batch_size": 2, "max_concurrency": 2,
+        # Toy 3-wide vectors/texts: prefix + normalization behaviour is covered in test_embed_llama_contract.py.
+        "task_prefixes": False, "normalize": False,
     }
 
 

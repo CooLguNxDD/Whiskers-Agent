@@ -174,6 +174,15 @@ inventory). You, the connected CLI agent, are the bridge:
    submits applications on your behalf") means the human reviews the report and clicks apply
    themselves; this flow never calls `submit_application`.
 
+## Destructive cleanup (separate operator permission)
+
+The pipeline key does not gain delete access. `delete_application(id)`,
+`delete_applicant_profile(id, force=False)` and `delete_job_liveness(url|url_hash)` require
+`group:job_search_plugin:delete`; all are tenant-scoped and dry-run by default. Profile
+removal refuses existing applications unless forced. PDF cleanup only removes recorded,
+unshared keys beneath the profile prefix; a hard storage failure keeps the row. These tools
+are GOAP-hidden and are not pipeline stages.
+
 ## Tests
 
 ```bash

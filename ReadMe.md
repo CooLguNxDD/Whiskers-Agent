@@ -464,6 +464,8 @@ First-time setup: `./install.sh --yes` (or `python terminal/script/setup.py env`
 | `GOAP_AGENT_LOG` | No | Default on — write `logs/goap_agent/<run_id>/` process logs |
 | `PLUGIN_API_URL` | No | Optional base URL for dynamic HTTP routes |
 
+Multimodal embeddings (opt-in `embed` llama.cpp sidecar, `EMBED_*` settings in [`.env.example`](./.env.example)): [docs/gemma-multimodal-embedding.md](./docs/gemma-multimodal-embedding.md).
+
 Full sample (including GoapAgent CLI knobs): [`.env_sample`](./.env_sample). Contributor detail: [CLAUDE.md](./CLAUDE.md).
 
 ## Tech Stack

@@ -257,6 +257,30 @@ async def delete_search_content_vectors_by_meta(
         return int(result.rowcount or 0)
 
 
+async def count_search_content_vectors_by_meta(
+    collection: str,
+    key: str,
+    value: str,
+    *,
+    tenant_id: int,
+) -> int:
+    """Count rows in *collection* whose ``meta[key] == value`` for the tenant.
+
+    Read-only twin of ``delete_search_content_vectors_by_meta`` (same predicate)
+    so a dry run reports exactly what the real delete would remove.
+    """
+    async with get_async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT COUNT(*) FROM search_content_vectors "
+                "WHERE collection = :collection AND tenant_id = :tenant_id "
+                "AND CAST(meta AS JSONB) ->> :key = :value"
+            ),
+            {"collection": collection, "tenant_id": tenant_id, "key": key, "value": value},
+        )
+        return int(result.scalar() or 0)
+
+
 # Aliases matching the legacy content_vectors_store API (search backend).
 add_content_vector = add_search_content_vector
 search_content_vectors = search_search_content_vectors
