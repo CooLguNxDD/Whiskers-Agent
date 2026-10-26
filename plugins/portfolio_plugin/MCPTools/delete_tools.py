@@ -100,7 +100,7 @@ async def delete_project(slug: str, dry_run: bool = True) -> dict[str, Any]:
 # ``static_tool_loader._qualify`` registers ``@mcp.tool`` ops as ``<plugin_id>__<name>``.
 _JOB_SEARCH_PLUGIN = "job_search_plugin"
 _JOB_APPS_OP = "list_applications_for_portfolio_job"
-_JOB_APPS_OP_QUALIFIED = f"{_JOB_SEARCH_PLUGIN}__{_JOB_APPS_OP}"
+_JOB_APPS_OP_QUALIFIED = "job_search_plugin__list_applications_for_portfolio_job"
 
 
 async def _portfolio_job_applications(short_id: str) -> tuple[list[dict] | None, str | None]:
