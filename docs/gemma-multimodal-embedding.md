@@ -44,8 +44,8 @@ Weights are fetched on first start into the named volume `embed_models`
 committed. `docker compose down -v` deletes the volume (and Postgres data: see
 CLAUDE.md), forcing a re-download.
 
-**Pinned runtime.** Image `ghcr.io/ggml-org/llama.cpp:server-cuda-b11457`: the
-`gemma-embedding2` architecture landed in llama.cpp PR #30054 (build b11457). The tag
+**Pinned runtime.** Image `ghcr.io/ggml-org/llama.cpp:server-cuda-b11459`: the
+`gemma-embedding2` architecture landed in llama.cpp PR #30054 (build b11457; b11457 has no published CUDA image, b11459 is the first). The tag
 is a fixed build number, never `latest` or an unpinned `server-cuda`; bump it
 deliberately and re-run the smoke test.
 
