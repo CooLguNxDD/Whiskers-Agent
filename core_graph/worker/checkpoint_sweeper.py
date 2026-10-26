@@ -1,8 +1,11 @@
-"""checkpoint_sweeper — periodic sweep of stale ``ephemeral-`` LangGraph threads.
+"""checkpoint_sweeper — periodic sweep of stale LangGraph checkpoint threads.
 
 ``evict_ephemeral_thread`` (core_graph/runtime/bootstrap.py) only runs on the clean
 exit path; an abort, timeout, or container restart leaves the thread's checkpoint
-rows behind indefinitely. This worker is the backstop.
+rows behind indefinitely. This worker is the backstop for ``ephemeral-`` threads.
+
+Session threads (``thread_id = session_id``) are swept separately and only when
+``session_retention_days`` > 0; in-use (locked) and interrupted threads are skipped.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ logger = logging.getLogger("whiskers")
 
 _DEFAULT_INTERVAL_SECONDS = 3600.0
 _DEFAULT_STALE_HOURS = 24.0
+_DEFAULT_SESSION_RETENTION_DAYS = 0.0  # 0 = session sweep disabled (opt-in)
 _STOP_TIMEOUT = 10.0
 _COUNTS: dict[str, int] = {"checkpoints": 0, "blobs": 0, "writes": 0}
 _LAST_DELETED: dict[str, int] = {"deleted": 0}
@@ -53,18 +57,38 @@ def _stale_hours() -> float:
     return float(cfg.get("stale_hours", _DEFAULT_STALE_HOURS))
 
 
+def _session_retention_days() -> float:
+    """Session-thread retention in days; 0 (default, or unparsable) disables the sweep."""
+    from utils.server_config import SCHEDULED_JOBS_CONFIG
+    cfg = SCHEDULED_JOBS_CONFIG.get("checkpoint_sweep", {})
+    try:
+        return float(cfg.get("session_retention_days", _DEFAULT_SESSION_RETENTION_DAYS))
+    except (TypeError, ValueError):
+        return _DEFAULT_SESSION_RETENTION_DAYS
+
+
 async def _tick() -> bool:
-    """Refresh cached checkpoint metrics and sweep once, then idle."""
+    """Sweep once and refresh cached checkpoint metrics, then idle.
+
+    Each step is guarded so one failing never blocks the others.
+    """
     global _TOTAL_DELETED
-    from core_graph.runtime.bootstrap import checkpoint_table_counts, sweep_stale_ephemeral_threads
+    from core_graph.runtime import bootstrap
+    deleted = 0
     try:
-        deleted = await sweep_stale_ephemeral_threads(older_than_hours=_stale_hours())
-        _LAST_DELETED["deleted"] = int(deleted or 0)
-        _TOTAL_DELETED += _LAST_DELETED["deleted"]
+        deleted += int(await bootstrap.sweep_stale_ephemeral_threads(older_than_hours=_stale_hours()) or 0)
     except Exception:
-        logger.exception("checkpoint_sweeper: tick failed")
+        logger.exception("checkpoint_sweeper: ephemeral sweep failed")
+    retention_days = _session_retention_days()
+    if retention_days > 0:
+        try:
+            deleted += int(await bootstrap.sweep_stale_session_threads(retention_days=retention_days) or 0)
+        except Exception:
+            logger.exception("checkpoint_sweeper: session sweep failed")
+    _LAST_DELETED["deleted"] = deleted
+    _TOTAL_DELETED += deleted
     try:
-        counts = await checkpoint_table_counts()
+        counts = await bootstrap.checkpoint_table_counts()
         _COUNTS.update(checkpoints=counts["checkpoints"], blobs=counts["checkpoint_blobs"], writes=counts["checkpoint_writes"])
     except Exception:
         logger.debug("checkpoint_sweeper: checkpoint count query failed", exc_info=True)

@@ -133,7 +133,8 @@
     "checkpoint_sweep": {
       "enabled": true,
       "interval_seconds": 3600,
-      "stale_hours": 24
+      "stale_hours": 24,
+      "session_retention_days": 0
     },
     "telemetry_sweep": {
       "enabled": true,
