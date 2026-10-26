@@ -296,6 +296,13 @@ GOAP_CANDIDATE_DENYLIST: set[tuple[str, str]] = {
     ("portfolio_plugin", "portfolio_plugin__bake_portfolio_for_job"),
     ("portfolio_plugin", "portfolio_plugin__patch_job_layout"),
     ("portfolio_plugin", "portfolio_plugin__list_bake_runs"),
+    # Destructive operator-only tools must never enter planner candidate search.
+    ("portfolio_plugin", "portfolio_plugin__delete_project"),
+    ("portfolio_plugin", "portfolio_plugin__delete_job_layout"),
+    ("portfolio_plugin", "portfolio_plugin__delete_bake_runs"),
+    ("job_search_plugin", "job_search_plugin__delete_application"),
+    ("job_search_plugin", "job_search_plugin__delete_applicant_profile"),
+    ("job_search_plugin", "job_search_plugin__delete_job_liveness"),
     ("portfolio_plugin", "portfolio_plugin__list_ask_turns"),
     # Ask-mode tools are dispatched only by the portfolio_ask_v1 FlowSpec (and
     # its synthetic specialist/<flow_id> op). Letting the planner pick them

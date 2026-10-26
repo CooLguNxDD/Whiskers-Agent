@@ -99,6 +99,9 @@ _GOAP_HIDDEN_OPS = (
     "portfolio_plugin__bake_portfolio_for_job",
     "portfolio_plugin__patch_job_layout",
     "portfolio_plugin__list_bake_runs",
+    "portfolio_plugin__delete_project",
+    "portfolio_plugin__delete_job_layout",
+    "portfolio_plugin__delete_bake_runs",
     "portfolio_plugin__list_ask_turns",
     # Ask mode: FlowSpec-dispatched only, never an ad-hoc GOAP plan step.
     "portfolio_plugin__route_portfolio_ask",
