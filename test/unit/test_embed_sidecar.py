@@ -43,14 +43,32 @@ def test_image_pinned_to_fixed_cuda_build(embed):
     assert "latest" not in embed["image"]
 
 
-def test_model_is_embeddinggemma2_q8_with_mmproj(embed):
+def test_model_precision_guard_rejects_fp16_but_allows_bf16_and_q8():
+    precision_guard = re.compile(r"(?<!b)f(?:p)?16", re.I)
+    for precision in ("FP16", "F16", "fp16"):
+        assert precision_guard.search(precision), f"{precision} must be rejected"
+    for precision in ("BF16", "Q8_0"):
+        assert not precision_guard.search(precision), f"{precision} must be allowed"
+
+
+def test_model_is_embeddinggemma2_q8_with_matching_mmproj(embed):
     cmd = _command(embed)
     assert "ggml-org/embeddinggemma-2-GGUF" in cmd
     assert "embeddinggemma-2" in cmd
     assert re.search(r"q8_0|bf16", cmd, re.I), "quant must be Q8_0 or BF16"
-    assert not re.search(r"(?<!b)f16", cmd, re.I), "FP16 weights are not allowed"
-    assert "mmproj" in cmd, "multimodal projector flag missing"
-    assert "--no-mmproj" not in cmd
+    assert not re.search(r"(?<!b)f(?:p)?16", cmd, re.I), "FP16 weights are not allowed"
+
+    args = shlex.split(cmd)
+    assert "--no-mmproj" not in args
+    assert "--no-mmproj-auto" not in args
+    repo = _flag(cmd, "hf-repo")
+    projector = _flag(cmd, "mmproj")
+    assert "--mmproj-auto" in args and repo and repo.startswith(
+        "ggml-org/embeddinggemma-2-GGUF"
+    ) or (
+        projector
+        and re.fullmatch(r"mmproj-embeddinggemma-2.*\.gguf", Path(projector).name, re.I)
+    ), "a matching embeddinggemma-2 projector must be configured"
 
 
 def test_embedding_flags(embed):
@@ -85,8 +103,7 @@ def test_internal_network_only_and_no_public_port(embed):
     nets = embed.get("networks") or []
     nets = list(nets.keys()) if isinstance(nets, dict) else list(nets)
     assert nets == ["whiskers-network"]
-    for p in embed.get("ports") or []:
-        assert str(p).startswith("127.0.0.1:"), f"host port must bind 127.0.0.1: {p}"
+    assert not embed.get("ports"), "embed must not publish a host port by default"
 
 
 def test_restart_policy(embed):
