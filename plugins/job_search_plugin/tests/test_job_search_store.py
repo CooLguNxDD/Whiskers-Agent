@@ -30,9 +30,18 @@ def test_plugin_local_migration_steps():
     assert [s.revision for s in steps] == [
         "0001_init", "0002_portfolio_job_id", "0003_job_liveness",
         "0004_hybrid_search", "0005_profile_targeting_fields",
+        "0006_profile_tenant_backfill",
     ]
     assert steps[0].kind == "py"
     assert steps[1].kind == "py"
+
+
+@pytest.fixture(autouse=True)
+def profile_tenant_context():
+    from core.context import current_tenant_id
+    token = current_tenant_id.set(1)
+    yield
+    current_tenant_id.reset(token)
 
 
 @pytest.fixture

@@ -64,8 +64,21 @@ def _app_to_dict(a: JobApplication) -> dict:
     }
 
 
+def _require_profile_tenant() -> int:
+    """Resolve the principal tenant for profile writes; reject missing/invalid context."""
+    from core.context import current_tenant_id
+
+    tenant_id = current_tenant_id.get()
+    if tenant_id is None or tenant_id <= 0:
+        raise ValueError("A positive tenant_id is required")
+    return tenant_id
+
+
 async def create_profile(**fields) -> dict:
-    """Create a new JobApplicantProfile."""
+    """Create a new JobApplicantProfile, stamped with the principal tenant."""
+    tenant_id = _require_profile_tenant()
+    fields.pop("tenant_id", None)
+    fields["tenant_id"] = tenant_id
     async with get_async_session() as session:
         profile = JobApplicantProfile(**fields)
         session.add(profile)
@@ -89,14 +102,14 @@ async def get_profile(profile_id: int) -> dict | None:
 async def get_profile_scoped(profile_id: int, tenant_id: int | None = None) -> dict | None:
     """Get a JobApplicantProfile by ID, scoped to the resolved tenant.
 
-    Explicit tenant_id wins; otherwise current_tenant_id contextvar (default 1).
+    Explicit tenant_id wins; otherwise current_tenant_id contextvar.
     Unlike get_profile, this never returns a row belonging to another tenant.
     """
     from core.context import current_tenant_id as _tenant_cv
 
     resolved_tenant = tenant_id if tenant_id is not None else _tenant_cv.get()
-    if resolved_tenant is None:
-        resolved_tenant = 1  # fail closed — never unscoped cross-tenant
+    if resolved_tenant is None or resolved_tenant <= 0:
+        return None
 
     async with get_async_session() as session:
         stmt = select(JobApplicantProfile).where(
@@ -116,24 +129,28 @@ async def upsert_profile(profile_id: int | None, **fields) -> dict:
     If profile_id is None, creates a new profile.
     Uses PostgreSQL insert ON CONFLICT to upsert if profile_id is provided.
     """
+    tenant_id = _require_profile_tenant()
+    fields.pop("tenant_id", None)
+    fields["tenant_id"] = tenant_id
     if profile_id is None:
         return await create_profile(**fields)
 
     async with get_async_session() as session:
-        # Check if it exists or use pg_insert
+        # A conflicting id can only be changed by its owning tenant.
         stmt = (
             pg_insert(JobApplicantProfile)
             .values(id=profile_id, **fields)
             .on_conflict_do_update(
                 index_elements=["id"],
                 set_={**fields, "updated_at": func.now()},
+                where=JobApplicantProfile.tenant_id == tenant_id,
             )
         )
         await session.execute(stmt)
         await session.commit()
 
     # Retrieve and return the upserted profile
-    updated = await get_profile(profile_id)
+    updated = await get_profile_scoped(profile_id, tenant_id=tenant_id)
     if not updated:
         raise ValueError(f"Failed to upsert/fetch profile with ID {profile_id}")
     return updated
@@ -333,6 +350,7 @@ async def add_preference_embedding(
     """Insert or upsert a preference/resume chunk embedding into the database."""
     import hashlib
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    tenant_id = _require_profile_tenant()
     async with get_async_session() as session:
         stmt = (
             pg_insert(JobPreferenceEmbedding)
@@ -343,6 +361,7 @@ async def add_preference_embedding(
                 embedding=embedding,
                 model=model,
                 content_hash=content_hash,
+                tenant_id=tenant_id,
             )
             .on_conflict_do_update(
                 index_elements=["applicant_profile_id", "source", "content_hash"],
