@@ -6,9 +6,24 @@
     "mcp_instructions_base": "You are an internal tool executor. \n\nPARALLELISM RULE: When a request contains multiple INDEPENDENT, DISTINCT goals (goals that don't depend on each other's output), emit ALL tool calls in a single response. Do not wait for one to complete before calling the next.\n\nIMPORTANT SCOPE OF PARALLELISM RULE: A single operation repeated over a list (create N of X, do the same thing for each item in a set) is NOT multiple independent goals — it is ONE run_graph call, never N individual tool calls. Let the server fan out.\n\nIndependent = no output from task A is needed as input to task B, AND the tasks are genuinely distinct goals.\nSequential = task B needs task A's result first.\n\nNEVER fabricate required field values.\n\nWhiskers Agent MCP platform — orchestrate plugin tools, proxy integrations, and multi-step workflows via run_graph.\n\nOFFLOAD DIRECTIVE: For any multi-step, batch, or repeated request, call run_graph ONCE with the whole goal as user_message. run_graph does GOAP planning, fan-out, and replanning server-side. Do NOT loop the underlying plugin tools yourself.\n\nExample (CORRECT): 'create 5 Jules sessions named A B C D E' → one run_graph(user_message='create 5 Jules sessions named A B C D E')\nExample (WRONG): five separate julescreate_session calls.\n\nNote: On some connections raw plugin and proxy tools may also be directly visible alongside run_graph. Even so, multi-step, batch, or repeated work must go through run_graph so the server's GOAP planner owns the plan and fan-out. Direct single-tool calls are acceptable only for a genuine one-shot single action (e.g. a single read/lookup with no follow-on steps).\n\nUse discover_tools (optionally with a query) to preview the live catalog of actions run_graph can orchestrate. discover_tools is optional and never a required precursor to run_graph.\n\nKeep platform rules: never fabricate entity data; require missing fields via need_input; bulk actions need confirmation.",
     "semantic_instructions_suffix": " Semantic search tools may be available per loaded plugin. Prefer semantic search when offered; upsert indexed content after writes. When semantic tools return no result, fall back to non-semantic tools so the user still gets a response.",
     "platform_rules": "- NEVER fabricate entity data (names, IDs, or other sensitive values).\n- If required fields are missing, return status=need_input.\n- Bulk operations require explicit confirmation.",
-    "platform_description": "the Whiskers Agent MCP platform"
+    "platform_description": "the Whiskers Agent MCP platform",
+    "goal_models": {
+      "data_retrieval": "gemini-2.5-flash",
+      "reasoning": "claude-sonnet-4-20250514",
+      "formatting": "gemini-2.5-flash",
+      "code_execution": null,
+      "api_call": null
+    }
   },
 
+  "parameters": {},
+  "terminal_relay": {
+    "step_up_method": "totp",
+    "elevation_ttl_seconds": 300,
+    "max_attempts": 3,
+    "lockout_seconds": 300,
+    "terminal_host_token_ttl_seconds": 900
+  },
   "pagination": {
     "safe_default_page_size": 20,
     "safe_default_page_index": 1,
@@ -43,6 +58,7 @@
     "confidence_confirm_threshold": 0.5,
     "max_replans": 2,
     "goap_max_steps": 12,
+    "goap_max_expansions": 1000,
     "candidate_top_k": 25,
     "decompose_first": true,
     "max_subtasks": 4,
@@ -117,7 +133,8 @@
     "checkpoint_sweep": {
       "enabled": true,
       "interval_seconds": 3600,
-      "stale_hours": 24
+      "stale_hours": 24,
+      "session_retention_days": 0
     },
     "telemetry_sweep": {
       "enabled": true,
@@ -171,5 +188,9 @@
     "path_prefixes": ["/mcp", "/api/portfolio"],
     "trust_proxy": false,
     "max_tracked_ips": 10000
+  },
+  "deployment": {
+    "replicas": 1,
+    "workers": 1
   }
 }

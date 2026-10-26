@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:0.8.1-pg18
     container_name: whiskers-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-whiskers}
@@ -60,7 +60,8 @@ services:
     ports:
       - "${MCP_PORT:-10000}:${MCP_PORT:-10000}"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       # OAuth (if USERNAME/PASSWORD are empty)
       OAUTH_ENABLED: ${OAUTH_ENABLED:-}
@@ -200,7 +201,8 @@ services:
       - whiskers-network
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://host.docker.internal:10000}
       MCP_SERVER_URL: ${MCP_SERVER_URL:-http://host.docker.internal:10000}
@@ -221,6 +223,53 @@ services:
           cpus: '0.5'
           memory: 256M
 
+  # Multimodal embedding sidecar: llama.cpp llama-server serving embeddinggemma-2
+  # (text + image + audio) on OpenAI-compatible /v1/embeddings. Opt-in: start with
+  # `docker compose up -d embed`. See docs/gemma-multimodal-embedding.md.
+  embed:
+    # Pinned build (>= b11457 adds the gemma-embedding2 arch, llama.cpp PR #30054). Never `latest`.
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11457
+    container_name: whiskers-embed
+    # -hf downloads the Q8_0 weights (never FP16) into LLAMA_CACHE; --mmproj-auto
+    # pulls the repo's matching mmproj-embeddinggemma-2-*.gguf projector alongside.
+    # ctx = batch = ubatch: embedding inputs are not split across physical batches.
+    command: >
+      --hf-repo ggml-org/embeddinggemma-2-GGUF:Q8_0
+      --mmproj-auto
+      --embeddings
+      --pooling mean
+      --ctx-size 4096
+      --batch-size 4096
+      --ubatch-size 4096
+      --n-gpu-layers 999
+      --host 0.0.0.0
+      --port 8080
+    environment:
+      LLAMA_CACHE: /models
+    volumes:
+      - embed_models:/models
+    # No host port by default (reached as http://embed:8080/v1 on whiskers-network).
+    # Opt-in debug access, loopback only:
+    # ports:
+    #   - "127.0.0.1:8081:8080"
+    networks:
+      - whiskers-network
+    restart: unless-stopped
+    healthcheck:
+      # curl ships in the llama.cpp server images. First start downloads weights: long start_period.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
 networks:
   whiskers-network:
     driver: bridge
@@ -229,3 +278,4 @@ volumes:
   postgres_data:
   pgadmin_data:
   minio_data:
+  embed_models:

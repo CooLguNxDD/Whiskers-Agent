@@ -1,6 +1,7 @@
 """Thin authenticated MCP callables/HTTP adapters; final tool/route discovery is S04-owned."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from starlette.requests import Request
@@ -9,6 +10,7 @@ from starlette.responses import JSONResponse
 from core.auth_service import get_auth_service
 from core.interfaces.principal import Principal
 from core.scope_management import PrincipalKind, ScopeGrant, evaluate_access
+from plugins.world_semantic_plugin import asset_packs
 from plugins.world_semantic_plugin.asset_index import (
     MAX_INDEX_BYTES, MAX_MEDIA_BYTES, index_assets as index_assets_service,
     search_assets as search_assets_service, validate_namespace,
@@ -17,6 +19,8 @@ from plugins.world_semantic_plugin.asset_index import (
 SEARCH_PATH = "/api/world/none/{world_id}/assets/search"
 INDEX_PATH = "/api/world/none/{world_id}/assets/index"
 OWNER = "world_semantic_plugin"
+logger = logging.getLogger("whiskers.plugins.world_semantic")
+SEARCH_FILTERS = ("role", "biome", "licence", "distribution", "pack", "max_tris")
 
 
 async def principal_for_tool() -> Principal | None:
@@ -51,19 +55,64 @@ def _trusted_root(tenant_id: int, world_id: str) -> Path:
     return Path(value)
 
 
+def _v3_context(tenant_id: int, world_id: str) -> dict:
+    """Server-side pack roots + local capability; never derived from the request."""
+    roots = asset_packs.pack_roots_for(tenant_id, world_id)
+    return {"pack_roots": roots, "allow_local": "packs-local" in roots}
+
+
 async def search_assets(world_id: str, query: str | None = None, image: dict | None = None,
-                        kind: str | None = None, tags: list[str] | None = None, k: int = 10) -> list[dict]:
+                        kind: str | None = None, tags: list[str] | None = None, k: int = 10,
+                        role: str | None = None, biome: str | None = None, licence: str | None = None,
+                        distribution: str | None = None, pack: str | None = None,
+                        max_tris: int | None = None) -> list[dict]:
     """MCP callable: authenticated tenant inferred from bearer; query XOR inline base64 PNG/JPEG."""
     tenant = _authorize(await principal_for_tool(), world_id, "search_assets", "read")
+    extra = {name: value for name, value in (("role", role), ("biome", biome), ("licence", licence),
+                                             ("distribution", distribution), ("pack", pack),
+                                             ("max_tris", max_tris)) if value is not None}
+    if extra or asset_packs.pack_roots_for(tenant, world_id):
+        extra.update(_v3_context(tenant, world_id))
     return await search_assets_service(query, image=image, tenant_id=tenant, world_id=world_id,
-                                       kind=kind, tags=tags, k=k)
+                                       kind=kind, tags=tags, k=k, **extra)
 
 
 async def index_assets(world_id: str, index: dict) -> dict:
     """MCP callable: stage craft-v3 JSON using only the server-configured trusted ingestion root."""
     tenant = _authorize(await principal_for_tool(), world_id, "index_assets", "write")
-    return await index_assets_service(index, tenant_id=tenant, world_id=world_id,
+    return await _index(index, tenant, world_id)
+
+
+async def _index(body: dict, tenant: int, world_id: str) -> dict:
+    """Version 3 uses configured pack roots; version 1 keeps the single trusted root."""
+    if isinstance(body, dict) and body.get("version") == 3:
+        return await index_assets_service(body, tenant_id=tenant, world_id=world_id,
+                                          pack_roots=asset_packs.pack_roots_for(tenant, world_id))
+    return await index_assets_service(body, tenant_id=tenant, world_id=world_id,
                                       trusted_root=_trusted_root(tenant, world_id))
+
+
+def is_mirrorable(meta) -> bool:
+    """Only an explicit `distribution == "shared"` may leave the server; unknown fails closed."""
+    return isinstance(meta, dict) and meta.get("distribution", "shared") == "shared"
+
+
+async def mirror_assets(assets: list[dict], sink, *, tenant_id: int, world_id: str) -> dict:
+    """Single choke point for every outbound mirror/sync/export/publish of asset records.
+
+    `distribution=local` (or malformed) assets are skipped and logged, never handed to `sink`.
+    """
+    mirrored = skipped = 0
+    for asset in assets:
+        meta = asset.get("metadata") if isinstance(asset, dict) else None
+        if not is_mirrorable(meta):
+            skipped += 1
+            logger.info("asset mirror skipped local asset tenant=%s world=%s asset=%s", tenant_id, world_id,
+                        asset.get("asset_id") if isinstance(asset, dict) else None)
+            continue
+        await sink(asset)
+        mirrored += 1
+    return {"mirrored": mirrored, "skipped_local": skipped}
 
 
 async def _http(request: Request, *, indexing: bool) -> JSONResponse:
@@ -91,11 +140,12 @@ async def _http(request: Request, *, indexing: bool) -> JSONResponse:
         if not isinstance(body, dict) or "tenant_id" in body or "trusted_root" in body:
             raise ValueError("invalid asset request shape")
         if indexing:
-            result = await index_assets_service(body, tenant_id=tenant, world_id=world,
-                                                trusted_root=_trusted_root(tenant, world))
+            result = await _index(body, tenant, world)
             return JSONResponse(result, status_code=202 if result["status"] == "enqueued" else 200)
-        if set(body) - {"query", "image", "kind", "tags", "k"}:
+        if set(body) - {"query", "image", "kind", "tags", "k", *SEARCH_FILTERS}:
             raise ValueError("unknown search parameter")
+        if set(body) & set(SEARCH_FILTERS) or asset_packs.pack_roots_for(tenant, world):
+            body.update(_v3_context(tenant, world))
         hits = await search_assets_service(tenant_id=tenant, world_id=world, **body)
         return JSONResponse({"status": "ok", "assets": hits})
     except PermissionError:

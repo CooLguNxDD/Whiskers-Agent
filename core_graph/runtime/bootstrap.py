@@ -108,6 +108,32 @@ _SWEEP_BATCH_LIMIT = 500
 _SWEEP_YIELD_EVERY = 50
 
 
+async def checkpoint_table_counts() -> dict[str, int]:
+    """Return catalog row-count estimates for LangGraph checkpoint tables.
+
+    ``pg_class.reltuples`` avoids scanning ever-growing checkpoint tables on each
+    telemetry tick; estimates are refreshed by PostgreSQL's ANALYZE/autovacuum.
+    """
+    await get_checkpointer()
+    if _pg_pool is None:
+        raise RuntimeError("checkpoint pool is unavailable")
+    counts: dict[str, int] = {}
+    async with _pg_pool.connection() as conn:
+        async with conn.cursor() as cur:
+            for table in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+                await cur.execute(
+                    "SELECT GREATEST(reltuples, 0)::bigint AS row_count "
+                    "FROM pg_class WHERE oid = to_regclass(%s) LIMIT 1",
+                    (table,),
+                )
+                row = await cur.fetchone()
+                if row is None:
+                    counts[table] = 0
+                else:
+                    counts[table] = int(row["row_count"] if isinstance(row, dict) else row[0])
+    return counts
+
+
 async def sweep_stale_ephemeral_threads(older_than_hours: float = 24.0) -> int:
     """Delete ``ephemeral-%`` threads whose newest checkpoint is older than the cutoff.
 
@@ -156,6 +182,92 @@ async def sweep_stale_ephemeral_threads(older_than_hours: float = 24.0) -> int:
             logger.debug("checkpoint_sweeper: delete failed for %s: %s", thread_id, exc)
     if swept:
         logger.info("checkpoint_sweeper: swept %d stale ephemeral thread(s)", swept)
+    return swept
+
+
+_INTERRUPT_CHANNEL = "__interrupt__"  # langgraph.constants.INTERRUPT
+
+
+def _session_lock_held(thread_id: str) -> bool:
+    """True when this process holds the session lock; never creates a map entry."""
+    lock = _session_locks.get(thread_id)
+    return lock is not None and lock.locked()
+
+
+async def _has_pending_interrupt(saver: Any, thread_id: str) -> bool:
+    """True when the thread's latest checkpoint carries an unresumed interrupt write.
+
+    Fails closed: if the checkpoint can't be read the thread counts as paused, so a
+    flaky read never turns into a delete.
+    """
+    try:
+        tup = await saver.aget_tuple({"configurable": {"thread_id": thread_id}})
+    except Exception as exc:
+        logger.debug("checkpoint_sweeper: interrupt check failed for %s: %s", thread_id, exc)
+        return True
+    if tup is None:
+        return False
+    return any(w[1] == _INTERRUPT_CHANNEL for w in (tup.pending_writes or ()))
+
+
+async def sweep_stale_session_threads(retention_days: float) -> int:
+    """Delete non-ephemeral (session) threads idle longer than ``retention_days``.
+
+    Opt-in: ``retention_days <= 0`` is a no-op and runs no query. Same shape as
+    ``sweep_stale_ephemeral_threads`` (batch limit, cooperative yield, own error
+    handling, returns the delete count). A thread is skipped — left for the next
+    tick — when its in-process session lock is held (a turn is running) or its
+    latest checkpoint has a pending interrupt (a human-in-the-loop pause).
+    Cross-process (multi-worker) lock detection is out of scope.
+    """
+    if retention_days <= 0:
+        return 0
+    saver = await get_checkpointer()
+    if saver is None or _pg_pool is None:
+        return 0
+    try:
+        async with _pg_pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT thread_id FROM checkpoints
+                    WHERE thread_id NOT LIKE 'ephemeral-%%'
+                    GROUP BY thread_id
+                    HAVING MAX((checkpoint->>'ts')::timestamptz)
+                        < now() - (%s * interval '1 day')
+                    LIMIT %s
+                    """,
+                    (retention_days, _SWEEP_BATCH_LIMIT),
+                )
+                rows = await cur.fetchall()
+    except Exception as exc:
+        logger.warning("checkpoint_sweeper: query for stale session threads failed: %s", exc)
+        return 0
+
+    swept = 0
+    for row in rows:
+        thread_id = row["thread_id"] if isinstance(row, dict) else row[0]
+        if thread_id.startswith("ephemeral-"):
+            continue
+        if _session_lock_held(thread_id):
+            logger.debug("checkpoint_sweeper: skip %s (session lock held)", thread_id)
+            continue
+        if await _has_pending_interrupt(saver, thread_id):
+            logger.debug("checkpoint_sweeper: skip %s (pending interrupt)", thread_id)
+            continue
+        # The interrupt read awaited: re-check the lock so a turn that started meanwhile wins.
+        if _session_lock_held(thread_id):
+            logger.debug("checkpoint_sweeper: skip %s (session lock held)", thread_id)
+            continue
+        try:
+            await saver.adelete_thread(thread_id)
+            swept += 1
+            if swept % _SWEEP_YIELD_EVERY == 0:
+                await asyncio.sleep(0)
+        except Exception as exc:
+            logger.debug("checkpoint_sweeper: delete failed for %s: %s", thread_id, exc)
+    if swept:
+        logger.info("checkpoint_sweeper: swept %d stale session thread(s)", swept)
     return swept
 
 

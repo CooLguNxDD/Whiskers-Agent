@@ -21,6 +21,12 @@ async def search_assets(
     kind: str | None = None,
     tags: list[str] | None = None,
     k: int = 10,
+    role: str | None = None,
+    biome: str | None = None,
+    licence: str | None = None,
+    distribution: str | None = None,
+    pack: str | None = None,
+    max_tris: int | None = None,
 ) -> list[dict]:
     """Multimodal search over worldgen assets by text query or inline image.
 
@@ -29,6 +35,9 @@ async def search_assets(
     kind: optional filter ('prop', 'block', 'texture', 'audio', 'stamp')
     tags: optional tag list (AND matched)
     k: top-k results (1 <= k <= 100, default 10)
+    role / biome / licence / pack: exact-match WorldGen v3 pack filters
+    distribution: 'shared' (default), 'local' or 'any' (local needs a packs-local root)
+    max_tris: keep assets with tri_count <= max_tris
     """
     return await asset_adapters.search_assets(
         world_id=world_id,
@@ -37,6 +46,12 @@ async def search_assets(
         kind=kind,
         tags=tags,
         k=k,
+        role=role,
+        biome=biome,
+        licence=licence,
+        distribution=distribution,
+        pack=pack,
+        max_tris=max_tris,
     )
 
 
@@ -51,7 +66,8 @@ async def index_assets(
 ) -> dict:
     """Stage and enqueue WorldGen asset library (versioned craft-v3 JSON) for embedding.
 
-    index: craft-v3 asset library payload {'version': 1, 'assets': [...]}
+    index: craft-v3 payload {'version': 1, 'assets': [...]} or WorldGen v3 pack records
+        {'version': 3, 'root': 'packs'|'packs-local', 'assets': [...]} (see ASSET_API.md)
     Reference image/audio files are read from server-configured trusted ingestion root.
     """
     return await asset_adapters.index_assets(

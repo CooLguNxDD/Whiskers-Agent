@@ -18,6 +18,47 @@ from pathlib import Path
 # runtime branches below that fall back to it can't drift from each other).
 DEFAULT_TEST_PATHS = ["test/", "plugins/"]
 
+def with_failure_report(pytest_args):
+    """Append `-rfE --tb=short` unless the caller already chose them.
+
+    Gate/fix rounds read the output: the short summary lists every FAILED/ERROR
+    test id with its first error line, so a real regression can be told apart
+    from a host-load timeout. Exit codes are untouched.
+    """
+    args = list(pytest_args)
+    if not any(a.startswith("-r") and not a.startswith("--") for a in args):
+        args.append("-rfE")
+    if not any(a.startswith("--tb") for a in args):
+        args.append("--tb=short")
+    return args
+
+DEFAULT_WORKTREE_IMAGE = "opencattunnelproject-whiskers-agent"
+
+def is_git_worktree(root: Path) -> bool:
+    """True when `root/.git` is a file starting with `gitdir:` (a linked git worktree)."""
+    git_path = Path(root) / ".git"
+    if not git_path.is_file():
+        return False
+    try:
+        return git_path.read_text(encoding="utf-8", errors="replace").lstrip().startswith("gitdir:")
+    except OSError:
+        return False
+
+def build_worktree_docker_cmd(root, image, pytest_args, env):
+    """Build the throwaway `docker run` argv that mounts this worktree at /app.
+
+    Re-enters `scripts/run_tests.py` in the container so the `_test` DB isolation
+    still applies. `image` falls back to env `WHISKERS_TEST_IMAGE`; the network is
+    `none` unless env `WHISKERS_TESTS_NETWORK` names one (opt-in DB access).
+    """
+    image = image or env.get("WHISKERS_TEST_IMAGE") or DEFAULT_WORKTREE_IMAGE
+    network = env.get("WHISKERS_TESTS_NETWORK") or "none"
+    return [
+        "docker", "run", "--rm", "--network", network,
+        "-v", f"{root}:/app", "-w", "/app", "-e", "PYTHONPATH=/app",
+        image, "python", "scripts/run_tests.py",
+    ] + list(pytest_args)
+
 def is_docker_container():
     """Detect if the script is running inside a Docker container."""
     return os.path.exists("/.dockerenv") or os.path.exists("/app")
@@ -110,7 +151,19 @@ def main():
         if not pytest_args:
             pytest_args = list(DEFAULT_TEST_PATHS)
 
-        sys.exit(pytest.main(pytest_args))
+        sys.exit(pytest.main(with_failure_report(pytest_args)))
+    elif is_git_worktree(project_root):
+        # Git worktree on host: the long-running server container only sees the
+        # main checkout, so run in a throwaway container with THIS worktree at /app.
+        print(f"[Host] Git worktree detected. Running tests in a throwaway container mounting {project_root} at /app...")
+        docker_cmd = build_worktree_docker_cmd(str(project_root), None, pytest_args, os.environ)
+        sub_env = os.environ.copy()
+        sub_env["MSYS_NO_PATHCONV"] = "1"
+        try:
+            sys.exit(subprocess.run(docker_cmd, env=sub_env).returncode)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+            sys.exit(1)
     else:
         # On Host machine: Check if the Docker container is running
         container_candidates = [
@@ -169,7 +222,7 @@ def main():
                 print("ERROR: 'pytest' not found locally on host. Run 'pip install -r requirements.txt' or start docker stack first.")
                 sys.exit(1)
                 
-            sys.exit(pytest.main(pytest_args))
+            sys.exit(pytest.main(with_failure_report(pytest_args)))
 
 if __name__ == "__main__":
     main()

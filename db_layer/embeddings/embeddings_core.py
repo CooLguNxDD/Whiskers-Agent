@@ -21,7 +21,7 @@ import json
 import logging
 import os
 
-from db_layer.embeddings.multimodal import EmbeddingInput
+from db_layer.embeddings.multimodal import EmbeddingInput, GemmaMultimodalEmbeddings
 
 from langchain_core.embeddings import Embeddings
 
@@ -141,6 +141,25 @@ async def _get_embeddings_async() -> Embeddings:
         return _embeddings
 
 
+def _titled_client(client: Embeddings) -> bool:
+    """True for a multimodal client that applies document task prefixes itself and accepts titles."""
+    return isinstance(client, GemmaMultimodalEmbeddings) and client.task_prefixes
+
+
+async def _embed_documents(client: Embeddings, texts: list[str], titles: list[str | None] | None) -> list[list[float]]:
+    """Format documents with the active profile, or hand raw text + titles to a task-prefixing client."""
+    from utils.embedding_config import format_document
+    if _titled_client(client):
+        # The client builds `title: <title> | text: <text>` itself, so titles are never lost.
+        return await client.aembed_documents(
+            [str(t) if t is not None else "" for t in texts], titles if titles else None)
+    if titles:
+        clean = [format_document(str(t) if t is not None else "", title=titles[i]) for i, t in enumerate(texts)]
+    else:
+        clean = [format_document(str(t) if t is not None else "") for t in texts]
+    return await client.aembed_documents(clean)
+
+
 async def embed(text: str) -> list[float]:
     """Generate an embedding vector for the given text."""
     from utils.embedding_config import format_query
@@ -157,16 +176,7 @@ async def embed_batch(texts: list[str], titles: list[str | None] | None = None) 
     """
     if not texts:
         return []
-    from utils.embedding_config import format_document
-    if titles:
-        clean = [
-            format_document(str(t) if t is not None else "", title=titles[i])
-            for i, t in enumerate(texts)
-        ]
-    else:
-        clean = [format_document(str(t) if t is not None else "") for t in texts]
-    emb = await _get_embeddings_async()
-    return await emb.aembed_documents(clean)
+    return await _embed_documents(await _get_embeddings_async(), texts, titles)
 
 
 _model_clients: dict[str, Embeddings] = {}
@@ -229,13 +239,4 @@ async def embed_documents_with(sel: dict, texts: list[str], titles: list[str | N
     """Generate embedding vectors for multiple texts using the explicit model selection."""
     if not texts:
         return []
-    from utils.embedding_config import format_document
-    if titles:
-        clean = [
-            format_document(str(t) if t is not None else "", title=titles[i])
-            for i, t in enumerate(texts)
-        ]
-    else:
-        clean = [format_document(str(t) if t is not None else "") for t in texts]
-    client = await _get_client_for(sel)
-    return await client.aembed_documents(clean)
+    return await _embed_documents(await _get_client_for(sel), texts, titles)
