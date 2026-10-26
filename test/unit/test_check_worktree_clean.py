@@ -117,3 +117,38 @@ def test_untracked_needs_allow_glob(repo):
 
 def test_bad_base_errors(repo):
     assert _run(repo, base="no-such-rev").returncode == 2
+
+
+def test_lockfile_compared_to_requested_base_not_merge_base(repo):
+    _git(repo, "checkout", "-q", "-b", "run")
+    _write(repo, "package-lock.json", '{"run": true}\n')
+    _git(repo, "commit", "-qam", "run lock change")
+    _git(repo, "checkout", "-q", "main")
+    _git(repo, "checkout", "-q", "-b", "step")
+    _write(repo, "app.py", "print(2)\n")
+    _git(repo, "commit", "-qam", "step change")
+    r = _run(repo, base="run")
+    assert r.returncode == 1
+    assert "package-lock.json" in r.stdout
+
+
+def test_untracked_stray_allowed_lockfile_remains_offender(repo):
+    _write(repo, ".claude/package-lock.json")
+    r = _run(repo, "--allow-lock", ".claude/package-lock.json")
+    assert r.returncode == 1
+    assert ".claude/package-lock.json" in r.stdout
+    assert "stray/generated" in r.stdout
+
+
+def test_untracked_lockfile_requires_allow_and_allow_lock(repo):
+    _write(repo, "new/package-lock.json")
+    assert _run(repo, "--allow-lock", "new/package-lock.json").returncode == 1
+    assert _run(repo, "--allow", "new/*").returncode == 1
+    assert _run(repo, "--allow-lock", "new/package-lock.json", "--allow", "new/*").returncode == 0
+
+
+def test_git_mv_lockfile_is_reported_without_allow_lock(repo):
+    _git(repo, "mv", "package-lock.json", "ordinary.json")
+    r = _run(repo)
+    assert r.returncode == 1
+    assert "package-lock.json" in r.stdout
