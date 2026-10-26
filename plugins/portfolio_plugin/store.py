@@ -8,8 +8,8 @@ should pass that tenant explicitly rather than inventing one.
 """
 
 import logging
-from datetime import date
-from sqlalchemy import select, delete
+from datetime import date, datetime
+from sqlalchemy import func, select, delete
 from db_layer.connection import get_async_session
 from plugins.portfolio_plugin.models import (
     ASK_TURN_INTENT_MAX,
@@ -269,6 +269,43 @@ async def get_job_layout_by_short_id(short_id: str) -> dict | None:
         return _job_layout_to_dict(row)
 
 
+async def get_job_layout_for_tenant(short_id: str, tenant_id: int) -> dict | None:
+    """Fetch a job layout by short_id, scoped to tenant (NULL-tenant rows never match)."""
+    async with get_async_session() as session:
+        stmt = (
+            select(PortfolioJobLayout)
+            .where(PortfolioJobLayout.short_id == short_id)
+            .where(PortfolioJobLayout.tenant_id == int(tenant_id))
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        return _job_layout_to_dict(row) if row else None
+
+
+async def list_job_layout_forks(short_id: str, tenant_id: int) -> list[str]:
+    """short_ids of derived forks (``parent_short_id == short_id``) in the same tenant."""
+    async with get_async_session() as session:
+        stmt = (
+            select(PortfolioJobLayout.short_id)
+            .where(PortfolioJobLayout.parent_short_id == short_id)
+            .where(PortfolioJobLayout.tenant_id == int(tenant_id))
+            .order_by(PortfolioJobLayout.id)
+        )
+        return [r for r in (await session.execute(stmt)).scalars().all()]
+
+
+async def delete_job_layout(short_id: str, tenant_id: int) -> bool:
+    """Delete one job layout row by short_id, scoped to tenant. Forks are untouched."""
+    async with get_async_session() as session:
+        stmt = (
+            delete(PortfolioJobLayout)
+            .where(PortfolioJobLayout.short_id == short_id)
+            .where(PortfolioJobLayout.tenant_id == int(tenant_id))
+        )
+        res = await session.execute(stmt)
+        await session.commit()
+        return (res.rowcount or 0) > 0
+
+
 async def create_bake_run(
     *,
     run_id: str,
@@ -348,6 +385,57 @@ async def list_bake_runs(
             }
             for r in rows
         ]
+
+
+def _bake_run_filter(stmt, *, tenant_id: int, run_id: str | None, created_before: datetime | None):
+    """Apply the tenant filter plus exactly the selectors given to a bake-run statement."""
+    stmt = stmt.where(PortfolioBakeRun.tenant_id == int(tenant_id))
+    if run_id is not None:
+        stmt = stmt.where(PortfolioBakeRun.run_id == run_id)
+    if created_before is not None:
+        stmt = stmt.where(PortfolioBakeRun.created_at < created_before)
+    return stmt
+
+
+async def select_bake_runs_for_delete(
+    *,
+    tenant_id: int,
+    run_id: str | None = None,
+    created_before: datetime | None = None,
+    limit: int = 200,
+) -> tuple[int, list[str]]:
+    """``(total matching, first *limit* run_ids)`` for a tenant-scoped bake-run delete."""
+    async with get_async_session() as session:
+        count_stmt = _bake_run_filter(
+            select(func.count()).select_from(PortfolioBakeRun),
+            tenant_id=tenant_id, run_id=run_id, created_before=created_before,
+        )
+        total = int((await session.execute(count_stmt)).scalar() or 0)
+        ids_stmt = _bake_run_filter(
+            select(PortfolioBakeRun.run_id),
+            tenant_id=tenant_id, run_id=run_id, created_before=created_before,
+        ).order_by(PortfolioBakeRun.created_at.desc()).limit(max(1, int(limit)))
+        ids = [r for r in (await session.execute(ids_stmt)).scalars().all()]
+        return total, ids
+
+
+async def delete_bake_runs(
+    *,
+    tenant_id: int,
+    run_id: str | None = None,
+    created_before: datetime | None = None,
+) -> int:
+    """Delete tenant-scoped bake runs matching *run_id* / *created_before*; returns row count."""
+    if run_id is None and created_before is None:
+        raise ValueError("delete_bake_runs requires run_id or created_before")
+    async with get_async_session() as session:
+        stmt = _bake_run_filter(
+            delete(PortfolioBakeRun),
+            tenant_id=tenant_id, run_id=run_id, created_before=created_before,
+        )
+        res = await session.execute(stmt)
+        await session.commit()
+        return int(res.rowcount or 0)
 
 
 async def create_ask_turn(

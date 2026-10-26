@@ -343,12 +343,17 @@ def test_bake_portfolio_for_job_source_sets_portfolio_job_id_alias():
     covered by portfolio_plugin's own bake tests, so this pins the specific line
     rather than re-mocking the whole pipeline here.
     """
-    import inspect
+    import ast
+    from pathlib import Path
 
-    from plugins.portfolio_plugin.MCPTools import bake_tools
-
-    src = inspect.getsource(bake_tools.bake_portfolio_for_job)
-    assert '"portfolio_job_id": short_id' in src
+    # Read the sibling plugin's source instead of importing it (no plugin->plugin imports).
+    path = Path(__file__).resolve().parents[2] / "portfolio_plugin" / "MCPTools" / "bake_tools.py"
+    text = path.read_text(encoding="utf-8")
+    fn = next(
+        n for n in ast.walk(ast.parse(text))
+        if isinstance(n, (ast.AsyncFunctionDef, ast.FunctionDef)) and n.name == "bake_portfolio_for_job"
+    )
+    assert '"portfolio_job_id": short_id' in ast.get_source_segment(text, fn)
 
 
 # ─── run_career_ops_pipeline (direct MCP dispatch surface) ────────────────

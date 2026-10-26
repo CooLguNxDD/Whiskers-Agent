@@ -6,7 +6,7 @@ Handles profile CRUD, job application tracking, and preference vector search.
 
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import select, update, func
+from sqlalchemy import delete, or_, select, update, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db_layer.connection import get_async_session
@@ -64,8 +64,21 @@ def _app_to_dict(a: JobApplication) -> dict:
     }
 
 
+def _require_profile_tenant() -> int:
+    """Resolve the principal tenant for profile writes; reject missing/invalid context."""
+    from core.context import current_tenant_id
+
+    tenant_id = current_tenant_id.get()
+    if tenant_id is None or tenant_id <= 0:
+        raise ValueError("A positive tenant_id is required")
+    return tenant_id
+
+
 async def create_profile(**fields) -> dict:
-    """Create a new JobApplicantProfile."""
+    """Create a new JobApplicantProfile, stamped with the principal tenant."""
+    tenant_id = _require_profile_tenant()
+    fields.pop("tenant_id", None)
+    fields["tenant_id"] = tenant_id
     async with get_async_session() as session:
         profile = JobApplicantProfile(**fields)
         session.add(profile)
@@ -89,14 +102,14 @@ async def get_profile(profile_id: int) -> dict | None:
 async def get_profile_scoped(profile_id: int, tenant_id: int | None = None) -> dict | None:
     """Get a JobApplicantProfile by ID, scoped to the resolved tenant.
 
-    Explicit tenant_id wins; otherwise current_tenant_id contextvar (default 1).
+    Explicit tenant_id wins; otherwise current_tenant_id contextvar.
     Unlike get_profile, this never returns a row belonging to another tenant.
     """
     from core.context import current_tenant_id as _tenant_cv
 
     resolved_tenant = tenant_id if tenant_id is not None else _tenant_cv.get()
-    if resolved_tenant is None:
-        resolved_tenant = 1  # fail closed — never unscoped cross-tenant
+    if resolved_tenant is None or resolved_tenant <= 0:
+        return None
 
     async with get_async_session() as session:
         stmt = select(JobApplicantProfile).where(
@@ -116,24 +129,28 @@ async def upsert_profile(profile_id: int | None, **fields) -> dict:
     If profile_id is None, creates a new profile.
     Uses PostgreSQL insert ON CONFLICT to upsert if profile_id is provided.
     """
+    tenant_id = _require_profile_tenant()
+    fields.pop("tenant_id", None)
+    fields["tenant_id"] = tenant_id
     if profile_id is None:
         return await create_profile(**fields)
 
     async with get_async_session() as session:
-        # Check if it exists or use pg_insert
+        # A conflicting id can only be changed by its owning tenant.
         stmt = (
             pg_insert(JobApplicantProfile)
             .values(id=profile_id, **fields)
             .on_conflict_do_update(
                 index_elements=["id"],
                 set_={**fields, "updated_at": func.now()},
+                where=JobApplicantProfile.tenant_id == tenant_id,
             )
         )
         await session.execute(stmt)
         await session.commit()
 
     # Retrieve and return the upserted profile
-    updated = await get_profile(profile_id)
+    updated = await get_profile_scoped(profile_id, tenant_id=tenant_id)
     if not updated:
         raise ValueError(f"Failed to upsert/fetch profile with ID {profile_id}")
     return updated
@@ -333,6 +350,7 @@ async def add_preference_embedding(
     """Insert or upsert a preference/resume chunk embedding into the database."""
     import hashlib
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    tenant_id = _require_profile_tenant()
     async with get_async_session() as session:
         stmt = (
             pg_insert(JobPreferenceEmbedding)
@@ -343,6 +361,7 @@ async def add_preference_embedding(
                 embedding=embedding,
                 model=model,
                 content_hash=content_hash,
+                tenant_id=tenant_id,
             )
             .on_conflict_do_update(
                 index_elements=["applicant_profile_id", "source", "content_hash"],
@@ -541,3 +560,206 @@ async def upsert_application_status(
         result_dict = _app_to_dict(new_app)
         await session.commit()
         return result_dict, True
+
+
+# ---------------------------------------------------------------------------
+# Tenant-scoped read/delete helpers for the delete tools. Every statement
+# filters tenant_id == tenant; NULL-tenant rows never match.
+# ---------------------------------------------------------------------------
+
+
+async def get_application_scoped(application_id: int, tenant_id: int) -> dict | None:
+    """Get a JobApplication by ID, only if it belongs to ``tenant_id``."""
+    async with get_async_session() as session:
+        stmt = select(JobApplication).where(
+            JobApplication.id == application_id,
+            JobApplication.tenant_id == tenant_id,
+        )
+        app = (await session.execute(stmt)).scalar_one_or_none()
+        return _app_to_dict(app) if app else None
+
+
+async def list_applications_for_profile_scoped(profile_id: int, tenant_id: int) -> list[dict]:
+    """List a profile's applications for ``tenant_id`` (oldest first)."""
+    async with get_async_session() as session:
+        stmt = (
+            select(JobApplication)
+            .where(
+                JobApplication.applicant_profile_id == profile_id,
+                JobApplication.tenant_id == tenant_id,
+            )
+            .order_by(JobApplication.id)
+        )
+        rows = (await session.execute(stmt)).scalars().all()
+        return [_app_to_dict(r) for r in rows]
+
+
+async def list_applications_for_portfolio_job_scoped(
+    portfolio_job_id: str, tenant_id: int
+) -> list[dict]:
+    """List applications whose portfolio_job_id matches exactly, for ``tenant_id``."""
+    async with get_async_session() as session:
+        stmt = (
+            select(JobApplication)
+            .where(
+                JobApplication.portfolio_job_id == portfolio_job_id,
+                JobApplication.tenant_id == tenant_id,
+            )
+            .order_by(JobApplication.id)
+        )
+        rows = (await session.execute(stmt)).scalars().all()
+        return [_app_to_dict(r) for r in rows]
+
+
+async def count_profile_embeddings_scoped(profile_id: int, tenant_id: int) -> int:
+    """Count preference embeddings the FK cascade would remove with this profile.
+
+    Joined to the tenant-owned profile row: embedding rows can carry a NULL
+    tenant_id, yet the cascade removes them all once the profile goes.
+    """
+    async with get_async_session() as session:
+        stmt = (
+            select(func.count(JobPreferenceEmbedding.id))
+            .join(
+                JobApplicantProfile,
+                JobApplicantProfile.id == JobPreferenceEmbedding.applicant_profile_id,
+            )
+            .where(
+                JobPreferenceEmbedding.applicant_profile_id == profile_id,
+                JobApplicantProfile.tenant_id == tenant_id,
+            )
+        )
+        return int((await session.execute(stmt)).scalar_one() or 0)
+
+
+async def find_shared_object_keys(
+    keys: list[str],
+    tenant_id: int,
+    exclude_application_ids: list[int] | None = None,
+    exclude_profile_id: int | None = None,
+) -> set[str]:
+    """Return the subset of ``keys`` still referenced by a surviving row.
+
+    Surviving = same-tenant job_applications / job_applicant_profiles rows that
+    are not about to be deleted: ``exclude_application_ids``, plus the profile
+    ``exclude_profile_id`` and every application of it.
+    """
+    wanted = list(dict.fromkeys(k for k in keys if k))
+    if not wanted:
+        return set()
+    excluded_apps = list(exclude_application_ids or [])
+    shared: set[str] = set()
+    async with get_async_session() as session:
+        app_stmt = select(
+            JobApplication.resume_object_key, JobApplication.cover_letter_object_key
+        ).where(
+            JobApplication.tenant_id == tenant_id,
+            or_(
+                JobApplication.resume_object_key.in_(wanted),
+                JobApplication.cover_letter_object_key.in_(wanted),
+            ),
+        )
+        if excluded_apps:
+            app_stmt = app_stmt.where(JobApplication.id.not_in(excluded_apps))
+        if exclude_profile_id is not None:
+            app_stmt = app_stmt.where(JobApplication.applicant_profile_id != exclude_profile_id)
+        for resume_key, cover_key in (await session.execute(app_stmt)).all():
+            shared.update(k for k in (resume_key, cover_key) if k in wanted)
+
+        prof_stmt = select(JobApplicantProfile.resume_object_key).where(
+            JobApplicantProfile.tenant_id == tenant_id,
+            JobApplicantProfile.resume_object_key.in_(wanted),
+        )
+        if exclude_profile_id is not None:
+            prof_stmt = prof_stmt.where(JobApplicantProfile.id != exclude_profile_id)
+        shared.update(k for (k,) in (await session.execute(prof_stmt)).all())
+    return shared
+
+
+async def delete_application_scoped(application_id: int, tenant_id: int) -> bool:
+    """Delete one JobApplication owned by ``tenant_id``; True when a row went."""
+    async with get_async_session() as session:
+        result = await session.execute(
+            delete(JobApplication).where(
+                JobApplication.id == application_id,
+                JobApplication.tenant_id == tenant_id,
+            )
+        )
+        await session.commit()
+        return bool(result.rowcount)
+
+
+async def delete_profile_scoped(profile_id: int, tenant_id: int) -> dict:
+    """Delete a profile owned by ``tenant_id``; the FK cascade removes dependants.
+
+    Returns {"deleted", "applications_deleted", "embeddings_deleted"}, with the
+    cascade counts read in the same transaction as the delete.
+    """
+    async with get_async_session() as session:
+        owned = (
+            await session.execute(
+                select(JobApplicantProfile.id).where(
+                    JobApplicantProfile.id == profile_id,
+                    JobApplicantProfile.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            return {"deleted": False, "applications_deleted": 0, "embeddings_deleted": 0}
+        apps = (
+            await session.execute(
+                select(func.count(JobApplication.id)).where(
+                    JobApplication.applicant_profile_id == profile_id,
+                    JobApplication.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        embeddings = (
+            await session.execute(
+                select(func.count(JobPreferenceEmbedding.id))
+                .join(
+                    JobApplicantProfile,
+                    JobApplicantProfile.id == JobPreferenceEmbedding.applicant_profile_id,
+                )
+                .where(
+                    JobPreferenceEmbedding.applicant_profile_id == profile_id,
+                    JobApplicantProfile.tenant_id == tenant_id,
+                )
+            )
+        ).scalar_one()
+        result = await session.execute(
+            delete(JobApplicantProfile).where(
+                JobApplicantProfile.id == profile_id,
+                JobApplicantProfile.tenant_id == tenant_id,
+            )
+        )
+        await session.commit()
+        return {
+            "deleted": bool(result.rowcount),
+            "applications_deleted": int(apps or 0),
+            "embeddings_deleted": int(embeddings or 0),
+        }
+
+
+async def get_liveness_by_hash(url_hash: str, tenant_id: int) -> dict | None:
+    """Look up a job_posting_liveness row by url_hash, only for ``tenant_id``."""
+    async with get_async_session() as session:
+        stmt = select(JobPostingLiveness).where(
+            JobPostingLiveness.url_hash == url_hash,
+            JobPostingLiveness.tenant_id == tenant_id,
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        return _liveness_to_dict(row) if row else None
+
+
+async def delete_liveness_scoped(url_hash: str, tenant_id: int) -> bool:
+    """Delete a job_posting_liveness row owned by ``tenant_id``; True when a row went."""
+    async with get_async_session() as session:
+        result = await session.execute(
+            delete(JobPostingLiveness).where(
+                JobPostingLiveness.url_hash == url_hash,
+                JobPostingLiveness.tenant_id == tenant_id,
+            )
+        )
+        await session.commit()
+        return bool(result.rowcount)

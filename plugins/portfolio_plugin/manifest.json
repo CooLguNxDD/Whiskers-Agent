@@ -27,6 +27,10 @@
       "description": "Operator writes: ingest, upsert, reconcile, bake"
     },
     {
+      "token": "group:portfolio_plugin:delete",
+      "description": "Permanently delete portfolio projects, job layouts and bake runs"
+    },
+    {
       "token": "group:portfolio_plugin:ask",
       "description": "Visitor ask mode: route, overlay patch, context discovery and fish spawn"
     }
