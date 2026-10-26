@@ -11,4 +11,5 @@ from . import evaluate_tools  # noqa: F401
 from . import application_tools, profile_tools  # noqa: F401
 from . import liveness_tools  # noqa: F401
 from . import pipeline_tools  # noqa: F401
+from . import delete_tools  # noqa: F401
 
