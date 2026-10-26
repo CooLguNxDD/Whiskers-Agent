@@ -98,8 +98,8 @@ async def probe_server(base_url: str) -> tuple[bool, str]:
             try:
                 props = (await http.get(f"{root}/props")).json()
                 build = sanitize(props.get("build_info") or props.get("build") or "unknown", 80)
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"/props probe failed ({type(exc).__name__})", file=sys.stderr)
     except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError):
         return False, build
     return True, build
