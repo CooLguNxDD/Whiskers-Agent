@@ -10,6 +10,7 @@
     {"token": "plugin:job_search_plugin", "description": "Full access to job search tools"},
     {"token": "group:job_search_plugin:read", "description": "Search jobs and view applications"},
     {"token": "group:job_search_plugin:write", "description": "Apply and track job applications"},
+    {"token": "group:job_search_plugin:delete", "description": "Permanently delete applications, applicant profiles and liveness records"},
     {"token": "group:job_search_plugin:profile", "description": "Read token-budgeted applicant profile summaries and proof points"},
     {"token": "group:job_search_plugin:application", "description": "Sync application lifecycle status (Career-Ops CLI integration)"},
     {"token": "group:job_search_plugin:search", "description": "Search and fetch job postings (unified ATS ingestion)"},

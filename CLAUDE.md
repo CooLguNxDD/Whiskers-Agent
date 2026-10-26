@@ -444,6 +444,7 @@ goals/                  agent goal files / achieve() persistence
   HTTP. `PortfolioAgent_run` is deliberately **not** in `GATEWAY_ALWAYS_VISIBLE`
   (`utils/server_config.py`) — allowlisting it would let any authenticated caller, including
   the ask key, reach the full portfolio agent with zero scope check.
+  **Deletes** (`delete_project`, `delete_job_layout`, `delete_bake_runs`) are destructive, dry-run by default, use the caller principal's tenant, require `group:portfolio_plugin:delete`, and are GOAP-hidden. Layout deletion refuses referenced applications unless `force`; derived forks are reported, not deleted. Project/context deletion removes matching context vectors, but GitHub reconcile may recreate a deleted project. NULL-tenant rows are never matched.
 - **job_search_plugin** — search / enrich / evaluate / apply / track tool groups; MinIO-stored resume
   and cover-letter PDFs; `JobApplication.portfolio_job_id` traces the baked portfolio layout.
   Paste ingest + board identity live in `posting_ingest.py` (Indeed `jk`/`vjk`, agency/via/
@@ -483,7 +484,7 @@ goals/                  agent goal files / achieve() persistence
   `prepare_application_record` omits a portfolio URL when bake failed or the public
   host is localhost. The flow always writes
   `sync_application_status`'s lifecycle value as `"drafted"` — it prepares an application, never
-  submits one.
+  submits one. Destructive `delete_application`, `delete_applicant_profile` and `delete_job_liveness` are dry-run by default, tenant-scoped from the principal, GOAP-hidden and require `group:job_search_plugin:delete`; NULL-tenant rows are never matched. Profile/application PDF cleanup is limited to recorded, unshared keys under the profile prefix; a hard MinIO failure keeps the database row. Profile deletion refuses existing applications unless `force`.
 - **search_plugin** — `web_search` (Tavily → Brave → keyless DuckDuckGo) + `fetch_url`;
   `semantic_index` / `semantic_search` over `search_content_vectors`.
 - **cat_terminal_relay_plugin** — terminal relay with step-up auth (TOTP/password), `ElevationService`,

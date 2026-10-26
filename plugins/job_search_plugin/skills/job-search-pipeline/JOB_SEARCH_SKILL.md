@@ -88,6 +88,14 @@ or a shape the flow doesn't cover
 - `resolve_pipeline_signals(...)` / `prepare_application_record(...)` — flow-internal slot-bridging
   adapters (§0), not usually called standalone.
 
+## Delete tools (operator-only)
+
+`delete_application(id)`, `delete_applicant_profile(id, force=False)` and
+`delete_job_liveness(url|url_hash)` are dry-run-first, tenant-scoped tools requiring
+`group:job_search_plugin:delete`. They are not Career-Ops pipeline stages and are
+GOAP-hidden. Profile deletion refuses applications unless forced; PDF cleanup only removes
+recorded, unshared objects beneath the profile prefix, and a hard MinIO failure keeps the row.
+
 ## 2. Rules
 
 - **Never submit.** `sync_application_status` (and the flow's `track` stage) only ever writes
