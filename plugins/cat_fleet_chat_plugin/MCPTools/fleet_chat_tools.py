@@ -768,12 +768,15 @@ async def fleet_list_publications(
     pattern: str | None = None,
     since_id: int | None = 0,
     limit: int | None = None,
+    order: str = "asc",
+    before_id: int | None = None,
     _response_shape: _Shape = None,
 ) -> Any:
-    """Replay topic publication history, oldest first. Drain has_more using cursor as since_id."""
+    """Replay topic publication history. asc: oldest first, cursor -> since_id; desc: newest first, cursor -> before_id."""
     return await request_json(
         "GET", "/api/v1/publications",
-        params={"pattern": pattern, "since_id": since_id, "limit": limit},
+        params={"pattern": pattern, "since_id": since_id, "limit": limit,
+                "order": order, "before_id": before_id},
         tool_name="fleet_list_publications", shape=_response_shape,
     )
 

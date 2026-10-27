@@ -63,8 +63,10 @@ not proof of identity. The shared hub Bearer token is managed by the server, nev
   manage durable subscriptions, where `*` is one segment and a trailing `>` is the rest
   (`ci.*.done`, `ci.>`). Matching publishes arrive as `topic.published` events in
   `fleet_wait_for_events(agent_name=...)`, payload `{id, topic, publisher, data}`; your own
-  publishes never wake you. `fleet_list_publications(pattern?, since_id=0, limit?)` replays
-  history (drain `has_more` with `cursor`); `fleet_list_subscriptions(agent?, topic?)` shows
+  publishes never wake you. `fleet_list_publications(pattern?, since_id=0, limit?, order="asc", before_id?)` replays
+  history (drain `has_more` with `cursor`; `order="desc"` pages newest first via `before_id`).
+  Subscription changes are `topic.subscribed` / `topic.unsubscribed` events (portal/audit only;
+  they never wake an agent's wait); `fleet_list_subscriptions(agent?, topic?)` shows
   who would receive a topic.
 
 All v2 tools support `_response_shape` and default to the existing dense CSV output.

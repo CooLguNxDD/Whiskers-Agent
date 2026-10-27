@@ -48,7 +48,8 @@ PUBSUB = [
     ("fleet_unsubscribe", {"agent": "sol", "pattern": "ci.>"}, "DELETE", "/api/v1/subscriptions/sol", "params", {"pattern": "ci.>"}),
     ("fleet_list_subscriptions", {"agent": "sol", "topic": "ci.done"}, "GET", "/api/v1/subscriptions", "params", {"agent": "sol", "topic": "ci.done"}),
     ("fleet_list_subscriptions", {}, "GET", "/api/v1/subscriptions", "params", {}),
-    ("fleet_list_publications", {"pattern": "ci.>", "since_id": 4, "limit": 10}, "GET", "/api/v1/publications", "params", {"pattern": "ci.>", "since_id": 4, "limit": 10}),
+    ("fleet_list_publications", {"pattern": "ci.>", "since_id": 4, "limit": 10}, "GET", "/api/v1/publications", "params", {"pattern": "ci.>", "since_id": 4, "limit": 10, "order": "asc", "before_id": None}),
+    ("fleet_list_publications", {"order": "desc", "before_id": 9}, "GET", "/api/v1/publications", "params", {"pattern": None, "since_id": 0, "limit": None, "order": "desc", "before_id": 9}),
 ]
 ALL_CASES = MAIL + FEED + KNOWLEDGE + PROPOSALS + PUBSUB
 
