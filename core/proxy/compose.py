@@ -1,16 +1,167 @@
-"""FastMCP composition logic for Whiskers Agent upstream proxies."""
+"""FastMCP composition logic for Whiskers Agent upstream proxies.
 
+Memory bounding (FastMCP opens a *fresh* upstream session per proxied request —
+initialize + GET stream + call + DELETE, each with its own ``httpx2.AsyncClient``):
+
+- every session's client reuses one shared TLS context instead of re-loading the
+  CA bundle (~1.4 MB + CPU per client);
+- a per-proxy semaphore caps concurrently open upstream sessions so agent fan-out
+  queues instead of stacking hundreds of live sessions;
+- ``tools``/``prompts``/``resources`` listings are coalesced (concurrent misses
+  share one upstream fetch) and served from a short TTL memo, so neither a burst
+  of front ``tools/list`` calls nor ``ProxyProvider``'s 300s lookup-cache expiry
+  re-downloads the upstream catalog once per caller.
+"""
+
+import asyncio
+import contextlib
 import logging
-from typing import Any
+import ssl
+import time
+from typing import Any, Awaitable, Callable
 
 from fastmcp import FastMCP
 from fastmcp.server import create_proxy
 from fastmcp.client.transports.http import StreamableHttpTransport
 from fastmcp.client.transports.sse import SSETransport
-from fastmcp.server.providers.proxy import ProxyClient
+from fastmcp.server.providers.proxy import ProxyClient, ProxyProvider
 from fastmcp.server.providers.fastmcp_provider import FastMCPProvider
 
 logger = logging.getLogger("whiskers.plugins")
+
+_DEFAULT_MAX_CONCURRENT_SESSIONS = 8
+_DEFAULT_LIST_CACHE_TTL_S = 60.0
+
+
+def _proxy_limits() -> tuple[int, float]:
+    """Return ``(max_concurrent_sessions, list_cache_ttl_s)`` from ``graph`` config, with defaults."""
+    sessions, ttl = _DEFAULT_MAX_CONCURRENT_SESSIONS, _DEFAULT_LIST_CACHE_TTL_S
+    try:
+        from utils.config_registry import get_config_registry
+        graph = get_config_registry().server.get("graph", {}) or {}
+        sessions = max(1, int(graph.get("proxy_max_concurrent_sessions", sessions)))
+        ttl = max(0.0, float(graph.get("proxy_list_cache_ttl_s", ttl)))
+    except Exception:
+        logger.debug("proxy limits config unavailable; using defaults", exc_info=True)
+    return sessions, ttl
+
+
+_shared_ssl_ctx: ssl.SSLContext | None = None
+
+
+def _shared_http_client_factory(
+    headers: dict[str, str] | None = None,
+    timeout: Any = None,
+    auth: Any = None,
+    follow_redirects: bool = True,
+    **_ignored: Any,
+) -> Any:
+    """``httpx_client_factory`` for upstream transports: MCP default timeouts, one shared TLS context."""
+    global _shared_ssl_ctx
+    import httpx2
+
+    if _shared_ssl_ctx is None:
+        # Same trust store httpx2 would build per client (honors SSL_CERT_FILE/DIR).
+        _shared_ssl_ctx = httpx2.create_ssl_context()
+    if timeout is None:
+        timeout = httpx2.Timeout(30.0, read=300.0)
+    return httpx2.AsyncClient(
+        headers=headers,
+        timeout=timeout,
+        auth=auth,
+        follow_redirects=follow_redirects,
+        verify=_shared_ssl_ctx,
+    )
+
+
+class _SessionGateMixin:
+    """Caps concurrently open upstream sessions per proxy (``Client.new()`` shares the transport)."""
+
+    _session_gate: asyncio.Semaphore
+
+    @contextlib.asynccontextmanager
+    async def connect_session(self, **kwargs: Any):
+        """Hold a gate slot for the whole upstream session lifetime."""
+        async with self._session_gate:
+            async with super().connect_session(**kwargs) as session:  # type: ignore[misc]
+                yield session
+
+
+class BoundedStreamableHttpTransport(_SessionGateMixin, StreamableHttpTransport):
+    """``StreamableHttpTransport`` with a per-proxy open-session cap and shared TLS context."""
+
+    def __init__(self, url: str, auth: Any = None, *, max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS):
+        super().__init__(url=url, auth=auth, httpx_client_factory=_shared_http_client_factory)
+        self._session_gate = asyncio.Semaphore(max_sessions)
+
+
+class BoundedSSETransport(_SessionGateMixin, SSETransport):
+    """``SSETransport`` with a per-proxy open-session cap and shared TLS context."""
+
+    def __init__(self, url: str, auth: Any = None, *, max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS):
+        super().__init__(url=url, auth=auth, httpx_client_factory=_shared_http_client_factory)
+        self._session_gate = asyncio.Semaphore(max_sessions)
+
+
+class CoalescingProxyProvider(ProxyProvider):
+    """``ProxyProvider`` whose list fetches are single-flight and briefly memoized.
+
+    Errors are never memoized; a waiter's cancellation never cancels the shared fetch.
+    """
+
+    _list_ttl_s: float
+    _list_memo: dict[str, tuple[float, Any]]
+    _list_inflight: dict[str, asyncio.Future]
+
+    def _init_coalescing(self, ttl_s: float) -> None:
+        """Initialize memo state (called after the in-place class swap in ``build_proxy``)."""
+        self._list_ttl_s = ttl_s
+        self._list_memo = {}
+        self._list_inflight = {}
+
+    async def _coalesced(self, kind: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
+        """Return a fresh memo hit, else join (or start) the one in-flight upstream fetch."""
+        hit = self._list_memo.get(kind)
+        if hit is not None and time.monotonic() - hit[0] < self._list_ttl_s:
+            return hit[1]
+        task = self._list_inflight.get(kind)
+        if task is None:
+            task = asyncio.ensure_future(fetch())
+            self._list_inflight[kind] = task
+            task.add_done_callback(lambda t, k=kind: self._finish_fetch(k, t))
+        return await asyncio.shield(task)
+
+    def _finish_fetch(self, kind: str, task: asyncio.Future) -> None:
+        """Clear the in-flight slot; memoize only successful results."""
+        if self._list_inflight.get(kind) is task:
+            del self._list_inflight[kind]
+        if task.cancelled():
+            return
+        if task.exception() is None:  # also marks a failure retrieved if every waiter left
+            self._list_memo[kind] = (time.monotonic(), task.result())
+
+    async def _list_tools(self):
+        return await self._coalesced("tools", super()._list_tools)
+
+    async def _list_resources(self):
+        return await self._coalesced("resources", super()._list_resources)
+
+    async def _list_resource_templates(self):
+        return await self._coalesced("resource_templates", super()._list_resource_templates)
+
+    async def _list_prompts(self):
+        return await self._coalesced("prompts", super()._list_prompts)
+
+
+def _install_coalescing(proxy_server: FastMCP, ttl_s: float) -> bool:
+    """Upgrade the proxy server's ``ProxyProvider`` in place (shared with ProxyMetadataMiddleware)."""
+    for provider in getattr(proxy_server, "providers", None) or ():
+        if type(provider) is ProxyProvider:
+            provider.__class__ = CoalescingProxyProvider
+            provider._init_coalescing(ttl_s)
+            return True
+    logger.warning("build_proxy: no ProxyProvider found; upstream list coalescing disabled")
+    return False
 
 
 _relay_auth_cls: type | None = None
@@ -113,10 +264,11 @@ def build_proxy(
         auth_header = oauth_config.get("auth_header") or "Authorization"
         auth_obj = _get_relay_auth_cls()(plugin_id=plugin_id, provider="upstream", auth_header=auth_header)
 
+    max_sessions, list_ttl_s = _proxy_limits()
     if transport.lower() == "sse" or url.endswith("/sse"):
-        client_transport = SSETransport(url=url, auth=auth_obj)
+        client_transport = BoundedSSETransport(url=url, auth=auth_obj, max_sessions=max_sessions)
     else:
-        client_transport = StreamableHttpTransport(url=url, auth=auth_obj)
+        client_transport = BoundedStreamableHttpTransport(url=url, auth=auth_obj, max_sessions=max_sessions)
 
     proxy_client = ProxyClient(client_transport, name=name)
 
@@ -126,6 +278,7 @@ def build_proxy(
     proxy_server = create_proxy(
         proxy_client, name=name, provider_error_strategy="raise"
     )
+    _install_coalescing(proxy_server, list_ttl_s)
 
     provider = FastMCPProvider(proxy_server)
     return provider
