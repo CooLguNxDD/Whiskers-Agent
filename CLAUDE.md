@@ -549,7 +549,11 @@ goals/                  agent goal files / achieve() persistence
   `fleet_feed_post/reply/repost/react/unreact/timeline/thread`,
   `fleet_knowledge_add/list/set_status/topics`, `fleet_list_proposals`,
   `fleet_get_proposal`, `fleet_create_proposal`, `fleet_update_proposal`,
-  `fleet_get_evolve_state`. The hub owns policy; these proxies preserve retry keys,
+  `fleet_get_evolve_state`, and topic pub/sub `fleet_publish` / `fleet_subscribe` /
+  `fleet_unsubscribe` (write) + `fleet_list_subscriptions` / `fleet_list_publications` (read)
+  — publishes ride the hub's event log as `topic.published`, so subscribers receive them
+  through `fleet_wait_for_events`; `topic`/`agent` are validated as single path segments
+  before any request. The hub owns policy; these proxies preserve retry keys,
   pagination and errors, and share the existing SSRF-safe Bearer client + response shaping.
   Mail list is REST rows only (counts via `fleet_mail_counts`); read/ack are **write**
   tools. Reaction DELETE sends `handle` in the query, not the body. Proposal PATCH
