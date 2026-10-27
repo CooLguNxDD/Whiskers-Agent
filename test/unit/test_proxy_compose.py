@@ -6,10 +6,19 @@ import httpx2
 from core.proxy.compose import build_proxy, mount_proxy, unmount_proxy, RelayAuth
 
 _CREATE_PROXY_KW = {"provider_error_strategy": "raise"}
+_MAX = 8
+
+
+@pytest.fixture(autouse=True)
+def _pin_proxy_limits():
+    """Pin session cap / list TTL so assertions don't depend on the server config file."""
+    with patch("core.proxy.compose._proxy_limits", return_value=(_MAX, 60.0)):
+        yield
 
 
 def test_build_proxy_none():
-    with patch("core.proxy.compose.StreamableHttpTransport") as mock_http, \
+    """No-auth HTTP proxy wires a bounded transport, ProxyClient and create_proxy."""
+    with patch("core.proxy.compose.BoundedStreamableHttpTransport") as mock_http, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
          patch("core.proxy.compose.FastMCPProvider") as mock_provider:
@@ -19,7 +28,7 @@ def test_build_proxy_none():
 
         res = build_proxy("test-none", "http", "http://localhost/api", "none")
 
-        mock_http.assert_called_once_with(url="http://localhost/api", auth=None)
+        mock_http.assert_called_once_with(url="http://localhost/api", auth=None, max_sessions=_MAX)
         mock_client.assert_called_once_with(mock_http.return_value, name="test-none")
         mock_create_proxy.assert_called_once_with(
             mock_client.return_value, name="test-none", **_CREATE_PROXY_KW
@@ -29,17 +38,18 @@ def test_build_proxy_none():
 
 
 def test_build_proxy_bearer():
-    with patch("core.proxy.compose.StreamableHttpTransport") as mock_http, \
+    """Bearer mode passes the token straight to the bounded transport."""
+    with patch("core.proxy.compose.BoundedStreamableHttpTransport") as mock_http, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
          patch("core.proxy.compose.FastMCPProvider") as mock_provider:
 
         build_proxy("test-bearer", "http", "http://localhost/api", "bearer", "my-token")
-        mock_http.assert_called_once_with(url="http://localhost/api", auth="my-token")
+        mock_http.assert_called_once_with(url="http://localhost/api", auth="my-token", max_sessions=_MAX)
 
 
 def test_build_proxy_oauth():
-    with patch("core.proxy.compose.StreamableHttpTransport") as mock_http, \
+    with patch("core.proxy.compose.BoundedStreamableHttpTransport") as mock_http, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
          patch("core.proxy.compose.FastMCPProvider") as mock_provider:
@@ -80,13 +90,16 @@ async def test_relay_auth_injects_bearer_header():
 
 
 def test_build_proxy_sse():
-    with patch("core.proxy.compose.SSETransport") as mock_sse, \
+    """An SSE proxy uses the bounded SSE transport."""
+    with patch("core.proxy.compose.BoundedSSETransport") as mock_sse, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
          patch("core.proxy.compose.FastMCPProvider") as mock_provider:
 
         build_proxy("test-sse", "sse", "http://localhost/sse-endpoint", "none")
-        mock_sse.assert_called_once_with(url="http://localhost/sse-endpoint", auth=None)
+        mock_sse.assert_called_once_with(
+            url="http://localhost/sse-endpoint", auth=None, max_sessions=_MAX
+        )
 
 
 def test_mount_proxy():

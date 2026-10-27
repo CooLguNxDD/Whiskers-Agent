@@ -70,6 +70,8 @@
     "max_skill_file_chars": 6500,
     "max_proxy_custom_description_chars": 2000,
     "proxy_response_shaping": true,
+    "proxy_max_concurrent_sessions": 8,
+    "proxy_list_cache_ttl_s": 60,
     "direct_call_shaping": true,
     "direct_call_shaping_exclude": [],
     "max_skill_total_chars": 10000,
