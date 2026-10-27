@@ -20,18 +20,21 @@ from core.proxy.compose import (
     BoundedStreamableHttpTransport,
     CoalescingProxyProvider,
     _install_coalescing,
+    _proxy_limits,
     build_proxy,
 )
 
 
 @pytest.mark.asyncio
 async def test_session_gate_caps_concurrent_upstream_sessions():
+    """Ten concurrent sessions never exceed the per-proxy cap of two."""
     transport = BoundedStreamableHttpTransport("http://upstream.test/mcp", max_sessions=2)
     live = 0
     peak = 0
 
     @contextlib.asynccontextmanager
     async def fake_connect(self, **kwargs):
+        """Track how many upstream sessions are open at once."""
         nonlocal live, peak
         live += 1
         peak = max(peak, live)
@@ -42,6 +45,7 @@ async def test_session_gate_caps_concurrent_upstream_sessions():
             live -= 1
 
     async def one_session():
+        """Open and briefly hold one upstream session."""
         async with transport.connect_session():
             await asyncio.sleep(0.01)
 
@@ -53,6 +57,7 @@ async def test_session_gate_caps_concurrent_upstream_sessions():
 
 
 def test_bounded_transports_use_shared_client_factory():
+    """Both bounded transports build httpx2 clients from the shared-TLS factory."""
     http = BoundedStreamableHttpTransport("http://upstream.test/mcp")
     sse = BoundedSSETransport("http://upstream.test/sse")
     assert http.httpx_client_factory is compose._shared_http_client_factory
@@ -61,6 +66,7 @@ def test_bounded_transports_use_shared_client_factory():
 
 @pytest.mark.asyncio
 async def test_shared_client_factory_builds_tls_context_once():
+    """The TLS context is created once and reused; MCP default timeouts apply."""
     import httpx2
 
     real = httpx2.create_ssl_context
@@ -75,6 +81,7 @@ async def test_shared_client_factory_builds_tls_context_once():
 
 
 def _coalescing_provider(ttl_s: float = 60.0) -> CoalescingProxyProvider:
+    """Build a ProxyProvider and upgrade it in place the way ``build_proxy`` does."""
     provider = ProxyProvider(lambda: None)
     assert _install_coalescing(SimpleNamespace(providers=[object(), provider]), ttl_s)
     assert isinstance(provider, CoalescingProxyProvider)
@@ -83,10 +90,12 @@ def _coalescing_provider(ttl_s: float = 60.0) -> CoalescingProxyProvider:
 
 @pytest.mark.asyncio
 async def test_concurrent_lists_share_one_upstream_fetch_and_memoize():
+    """25 concurrent lists hit upstream once; a follow-up within TTL is a memo hit."""
     provider = _coalescing_provider()
     calls = 0
 
     async def fake_list(self):
+        """Count upstream list calls."""
         nonlocal calls
         calls += 1
         await asyncio.sleep(0.01)
@@ -102,14 +111,17 @@ async def test_concurrent_lists_share_one_upstream_fetch_and_memoize():
 
 @pytest.mark.asyncio
 async def test_list_memo_expires_and_kinds_are_independent():
+    """A zero TTL refetches every time, and each list kind has its own memo."""
     provider = _coalescing_provider(ttl_s=0.0)
     calls = {"tools": 0, "prompts": 0}
 
     async def fake_tools(self):
+        """Count upstream tools lists."""
         calls["tools"] += 1
         return []
 
     async def fake_prompts(self):
+        """Count upstream prompts lists."""
         calls["prompts"] += 1
         return []
 
@@ -123,10 +135,12 @@ async def test_list_memo_expires_and_kinds_are_independent():
 
 @pytest.mark.asyncio
 async def test_list_errors_propagate_and_are_not_memoized():
+    """A failed fetch reaches every waiter and the next call retries upstream."""
     provider = _coalescing_provider()
     calls = 0
 
     async def flaky(self):
+        """Fail on the first upstream call, succeed afterwards."""
         nonlocal calls
         calls += 1
         await asyncio.sleep(0.01)
@@ -145,10 +159,12 @@ async def test_list_errors_propagate_and_are_not_memoized():
 
 @pytest.mark.asyncio
 async def test_cancelled_waiter_does_not_cancel_shared_fetch():
+    """Cancelling one waiter leaves the shared fetch running for the others."""
     provider = _coalescing_provider()
     release = asyncio.Event()
 
     async def slow(self):
+        """Block until released."""
         await release.wait()
         return ["done"]
 
@@ -171,3 +187,31 @@ def test_build_proxy_wires_bounded_transport_and_coalescing_provider():
     assert isinstance(inner[0], CoalescingProxyProvider)
     client = inner[0].client_factory()
     assert isinstance(client.transport, BoundedStreamableHttpTransport)
+
+
+def _limits_with(graph: dict) -> tuple[int, float]:
+    """Resolve ``_proxy_limits`` against a stubbed ``graph`` config block."""
+    registry = SimpleNamespace(server={"graph": graph})
+    with patch("utils.config_registry.get_config_registry", return_value=registry):
+        return _proxy_limits()
+
+
+def test_proxy_limits_read_config_and_default():
+    """Configured values are used; missing keys fall back to the defaults."""
+    assert _limits_with({"proxy_max_concurrent_sessions": 3, "proxy_list_cache_ttl_s": 5}) == (3, 5.0)
+    assert _limits_with({}) == (8, 60.0)
+
+
+def test_proxy_limits_invalid_value_warns_without_dropping_the_other(caplog):
+    """One bad key warns and defaults alone; the valid sibling key still applies."""
+    with caplog.at_level("WARNING", logger="whiskers.plugins"):
+        limits = _limits_with({"proxy_max_concurrent_sessions": "lots", "proxy_list_cache_ttl_s": 5})
+    assert limits == (8, 5.0)
+    assert "proxy_max_concurrent_sessions" in caplog.text
+
+
+def test_proxy_limits_clamp_below_minimum(caplog):
+    """A zero session cap would deadlock every call, so it clamps to 1 with a warning."""
+    with caplog.at_level("WARNING", logger="whiskers.plugins"):
+        assert _limits_with({"proxy_max_concurrent_sessions": 0, "proxy_list_cache_ttl_s": -1}) == (1, 0.0)
+    assert "clamping" in caplog.text

@@ -17,6 +17,7 @@ def _pin_proxy_limits():
 
 
 def test_build_proxy_none():
+    """No-auth HTTP proxy wires a bounded transport, ProxyClient and create_proxy."""
     with patch("core.proxy.compose.BoundedStreamableHttpTransport") as mock_http, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
@@ -37,6 +38,7 @@ def test_build_proxy_none():
 
 
 def test_build_proxy_bearer():
+    """Bearer mode passes the token straight to the bounded transport."""
     with patch("core.proxy.compose.BoundedStreamableHttpTransport") as mock_http, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \
@@ -88,6 +90,7 @@ async def test_relay_auth_injects_bearer_header():
 
 
 def test_build_proxy_sse():
+    """An SSE proxy uses the bounded SSE transport."""
     with patch("core.proxy.compose.BoundedSSETransport") as mock_sse, \
          patch("core.proxy.compose.ProxyClient") as mock_client, \
          patch("core.proxy.compose.create_proxy") as mock_create_proxy, \

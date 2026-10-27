@@ -33,16 +33,30 @@ _DEFAULT_MAX_CONCURRENT_SESSIONS = 8
 _DEFAULT_LIST_CACHE_TTL_S = 60.0
 
 
+def _config_number(graph: dict, key: str, default: Any, cast: Callable[[Any], Any], floor: Any) -> Any:
+    """Read one numeric ``graph`` key; warn and fall back to ``default`` on an invalid value."""
+    raw = graph.get(key, default)
+    try:
+        value = cast(raw)
+    except (TypeError, ValueError):
+        logger.warning("Invalid graph.%s=%r; using default %r", key, raw, default)
+        return default
+    if value < floor:
+        logger.warning("graph.%s=%r below minimum %r; clamping", key, raw, floor)
+        return floor
+    return value
+
+
 def _proxy_limits() -> tuple[int, float]:
     """Return ``(max_concurrent_sessions, list_cache_ttl_s)`` from ``graph`` config, with defaults."""
-    sessions, ttl = _DEFAULT_MAX_CONCURRENT_SESSIONS, _DEFAULT_LIST_CACHE_TTL_S
     try:
         from utils.config_registry import get_config_registry
         graph = get_config_registry().server.get("graph", {}) or {}
-        sessions = max(1, int(graph.get("proxy_max_concurrent_sessions", sessions)))
-        ttl = max(0.0, float(graph.get("proxy_list_cache_ttl_s", ttl)))
     except Exception:
         logger.debug("proxy limits config unavailable; using defaults", exc_info=True)
+        graph = {}
+    sessions = _config_number(graph, "proxy_max_concurrent_sessions", _DEFAULT_MAX_CONCURRENT_SESSIONS, int, 1)
+    ttl = _config_number(graph, "proxy_list_cache_ttl_s", _DEFAULT_LIST_CACHE_TTL_S, float, 0.0)
     return sessions, ttl
 
 
@@ -141,15 +155,19 @@ class CoalescingProxyProvider(ProxyProvider):
             self._list_memo[kind] = (time.monotonic(), task.result())
 
     async def _list_tools(self):
+        """List upstream tools via the coalesced, TTL-memoized fetch."""
         return await self._coalesced("tools", super()._list_tools)
 
     async def _list_resources(self):
+        """List upstream resources via the coalesced, TTL-memoized fetch."""
         return await self._coalesced("resources", super()._list_resources)
 
     async def _list_resource_templates(self):
+        """List upstream resource templates via the coalesced, TTL-memoized fetch."""
         return await self._coalesced("resource_templates", super()._list_resource_templates)
 
     async def _list_prompts(self):
+        """List upstream prompts via the coalesced, TTL-memoized fetch."""
         return await self._coalesced("prompts", super()._list_prompts)
 
 
