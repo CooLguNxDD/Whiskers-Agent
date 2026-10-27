@@ -41,7 +41,16 @@ PROPOSALS = [
     ("fleet_update_proposal", {"proposal_id": 12, "actor": "sol", "status": "accepted"}, "PATCH", "/api/v1/proposals/12", "body", {"actor": "sol", "status": "accepted"}),
     ("fleet_get_evolve_state", {}, "GET", "/api/v1/evolve/state", "params", {}),
 ]
-ALL_CASES = MAIL + FEED + KNOWLEDGE + PROPOSALS
+PUBSUB = [
+    ("fleet_publish", {"publisher": "sol", "topic": "ci.whiskers.done", "data": {"ok": True}, "client_request_id": "pub-1"}, "POST", "/api/v1/topics/ci.whiskers.done/publish", "body", {"publisher": "sol", "data": {"ok": True}, "client_request_id": "pub-1"}),
+    ("fleet_publish", {"publisher": "sol", "topic": "jobs"}, "POST", "/api/v1/topics/jobs/publish", "body", {"publisher": "sol"}),
+    ("fleet_subscribe", {"agent": "sol", "pattern": "ci.*.done"}, "POST", "/api/v1/subscriptions/sol", "body", {"pattern": "ci.*.done"}),
+    ("fleet_unsubscribe", {"agent": "sol", "pattern": "ci.>"}, "DELETE", "/api/v1/subscriptions/sol", "params", {"pattern": "ci.>"}),
+    ("fleet_list_subscriptions", {"agent": "sol", "topic": "ci.done"}, "GET", "/api/v1/subscriptions", "params", {"agent": "sol", "topic": "ci.done"}),
+    ("fleet_list_subscriptions", {}, "GET", "/api/v1/subscriptions", "params", {}),
+    ("fleet_list_publications", {"pattern": "ci.>", "since_id": 4, "limit": 10}, "GET", "/api/v1/publications", "params", {"pattern": "ci.>", "since_id": 4, "limit": 10}),
+]
+ALL_CASES = MAIL + FEED + KNOWLEDGE + PROPOSALS + PUBSUB
 
 
 async def _assert_wire(case):
@@ -83,6 +92,12 @@ async def test_proposal_and_evolve_wire_contract(case):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("case", PUBSUB)
+async def test_pubsub_wire_contract(case):
+    await _assert_wire(case)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case", ALL_CASES)
 async def test_hub_errors_pass_through(case):
     name, args, *_ = case
@@ -118,6 +133,11 @@ async def test_reaction_kinds(kind):
     ("fleet_feed_react", {"handle": "sol", "post_id": 7, "kind": "../repost"}),
     ("fleet_feed_unreact", {"handle": "sol", "post_id": 7, "kind": "invalid"}),
     ("fleet_get_proposal", {"proposal_id": "../evolve/state"}),
+    ("fleet_publish", {"publisher": "sol", "topic": "../mailbox"}),
+    ("fleet_publish", {"publisher": "sol", "topic": "ci.*"}),
+    ("fleet_publish", {"publisher": "sol", "topic": "ci/done"}),
+    ("fleet_subscribe", {"agent": "../x", "pattern": "ci.>"}),
+    ("fleet_unsubscribe", {"agent": "sol?all=1", "pattern": "ci.>"}),
 ])
 async def test_obvious_bad_path_inputs_fail_fast(name, args):
     with patch(f"{_TOOLS}.request_json", new_callable=AsyncMock) as hub:
