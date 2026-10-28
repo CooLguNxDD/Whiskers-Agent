@@ -1,5 +1,6 @@
 """ProxyManager: an upstream whose tools listing exhausts its reconnect attempts is marked unavailable."""
 
+import asyncio
 import contextlib
 import importlib
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -82,3 +83,39 @@ def test_watch_upstream_only_tools_exhaustion_marks_unavailable():
         hooks[0]("tools", 6, "405")
     spawn.assert_called_once()
     spawn.call_args.args[0].close()  # never-awaited coroutine from the patched spawn
+
+
+@pytest.mark.asyncio
+async def test_mark_unavailable_waits_for_inflight_reconnect():
+    """A reconnect holding the proxy lock wins: the late cleanup then sees a new handle and no-ops."""
+    old_provider = object()
+    manager = _manager_with(old_provider)
+    lock = manager._proxy_lock("notion")
+    await lock.acquire()  # reconnect (test_proxy) in flight
+    with patch.object(pm, "unmount_proxy") as unmount, \
+         patch.object(pm, "get_async_session") as session:
+        cleanup = asyncio.ensure_future(manager._mark_unavailable("notion", old_provider, 6, "boom"))
+        await asyncio.sleep(0)
+        assert not cleanup.done()
+        manager._active_handles["notion"] = object()  # reconnect mounted a fresh provider
+        lock.release()
+        await cleanup
+    unmount.assert_not_called()
+    session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_test_proxy_takes_the_proxy_lock():
+    """``test_proxy`` runs its body under the same per-proxy lock as unavailable cleanup."""
+    manager = pm.ProxyManager()
+    seen = {}
+
+    async def body(name):
+        """Record whether the lock is held while the reconnect body runs."""
+        seen["locked"] = manager._proxy_lock(name).locked()
+        return {"ok": True}
+
+    manager._test_proxy_locked = body
+    assert await manager.test_proxy("notion") == {"ok": True}
+    assert seen["locked"] is True
+    assert not manager._proxy_lock("notion").locked()

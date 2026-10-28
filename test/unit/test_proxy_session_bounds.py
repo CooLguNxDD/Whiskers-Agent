@@ -286,6 +286,8 @@ def test_backoff_delay_is_exponential_capped_and_jittered():
             assert full / 2 <= policy.delay(failures) <= full
     assert not policy.exhausted(4) and policy.exhausted(5)
     assert not BackoffPolicy(max_attempts=0).exhausted(10_000)
+    # Retry-forever mode must not overflow int->float after ~1024 failures.
+    assert 150.0 <= BackoffPolicy(max_s=300.0, max_attempts=0).delay(5_000) <= 300.0
 
 
 def test_proxy_backoff_reads_config_and_clamps(caplog):

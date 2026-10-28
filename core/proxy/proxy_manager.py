@@ -54,6 +54,11 @@ class ProxyManager(IProxyManager):
     def __init__(self):
         """Initialize the proxy manager with an empty active handles dictionary."""
         self._active_handles = {}  # name -> provider_handle
+        self._proxy_locks: dict[str, asyncio.Lock] = {}  # serializes unavailable cleanup vs reconnect
+
+    def _proxy_lock(self, name: str) -> asyncio.Lock:
+        """Return the per-proxy lock shared by ``_mark_unavailable`` and ``test_proxy``."""
+        return self._proxy_locks.setdefault(name, asyncio.Lock())
 
 
     def subscribe(self, events) -> None:
@@ -318,6 +323,11 @@ class ProxyManager(IProxyManager):
 
     async def _mark_unavailable(self, name: str, provider: Any, failures: int, error: str) -> None:
         """Unmount a dead proxy, flag its row ``error`` with a reconnect request, emit ``proxy.unavailable``."""
+        async with self._proxy_lock(name):
+            await self._mark_unavailable_locked(name, provider, failures, error)
+
+    async def _mark_unavailable_locked(self, name: str, provider: Any, failures: int, error: str) -> None:
+        """``_mark_unavailable`` body; caller holds the proxy lock so a reconnect can't interleave."""
         if self._active_handles.get(name) is not provider:
             return  # already reconnected, disabled or removed since the hook fired
         try:
@@ -783,6 +793,11 @@ class ProxyManager(IProxyManager):
 
     async def test_proxy(self, name: str) -> Dict[str, Any]:
         """Re-connect, refresh toolCount, update status and errors in DB."""
+        async with self._proxy_lock(name):
+            return await self._test_proxy_locked(name)
+
+    async def _test_proxy_locked(self, name: str) -> Dict[str, Any]:
+        """``test_proxy`` body; caller holds the proxy lock."""
         async with get_async_session() as session:
             stmt = select(ProxyServer).where(ProxyServer.name == name)
             proxy = (await session.execute(stmt)).scalar_one_or_none()

@@ -93,7 +93,9 @@ class BackoffPolicy:
 
     def delay(self, failures: int) -> float:
         """Seconds to wait after the ``failures``-th consecutive failure (jittered in ``[d/2, d]``)."""
-        d = min(self.base_s * (2 ** max(failures - 1, 0)), self.max_s)
+        # Clamp the exponent: retry-forever mode would otherwise overflow int->float near 2**1024.
+        exp = min(max(failures - 1, 0), 62)
+        d = min(self.base_s * (2 ** exp), self.max_s)
         return d / 2 + random.random() * d / 2
 
     def exhausted(self, failures: int) -> bool:
