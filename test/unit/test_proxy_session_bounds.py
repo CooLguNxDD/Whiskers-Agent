@@ -16,12 +16,16 @@ from fastmcp.server.providers.proxy import ProxyProvider
 
 import core.proxy.compose as compose
 from core.proxy.compose import (
+    BackoffPolicy,
     BoundedSSETransport,
     BoundedStreamableHttpTransport,
     CoalescingProxyProvider,
+    ProxyBackoffError,
     _install_coalescing,
+    _proxy_backoff,
     _proxy_limits,
     build_proxy,
+    set_exhausted_hook,
 )
 
 
@@ -80,10 +84,12 @@ async def test_shared_client_factory_builds_tls_context_once():
         assert spy.call_count == 1
 
 
-def _coalescing_provider(ttl_s: float = 60.0) -> CoalescingProxyProvider:
+def _coalescing_provider(
+    ttl_s: float = 60.0, backoff: BackoffPolicy | None = None
+) -> CoalescingProxyProvider:
     """Build a ProxyProvider and upgrade it in place the way ``build_proxy`` does."""
     provider = ProxyProvider(lambda: None)
-    assert _install_coalescing(SimpleNamespace(providers=[object(), provider]), ttl_s)
+    assert _install_coalescing(SimpleNamespace(providers=[object(), provider]), ttl_s, backoff)
     assert isinstance(provider, CoalescingProxyProvider)
     return provider
 
@@ -135,8 +141,8 @@ async def test_list_memo_expires_and_kinds_are_independent():
 
 @pytest.mark.asyncio
 async def test_list_errors_propagate_and_are_not_memoized():
-    """A failed fetch reaches every waiter and the next call retries upstream."""
-    provider = _coalescing_provider()
+    """A failed fetch reaches every waiter and the next call (zero backoff) retries upstream."""
+    provider = _coalescing_provider(backoff=BackoffPolicy(base_s=0.0, max_s=0.0))
     calls = 0
 
     async def flaky(self):
@@ -177,6 +183,128 @@ async def test_cancelled_waiter_does_not_cancel_shared_fetch():
         release.set()
         assert await second == ["done"]
         assert first.cancelled()
+
+
+def _always_failing(counter: dict):
+    """Return a fake upstream list that counts calls and always raises."""
+    async def fail(self):
+        """Simulate an upstream answering 405."""
+        counter["calls"] += 1
+        raise RuntimeError("405 Method Not Allowed")
+    return fail
+
+
+@pytest.mark.asyncio
+async def test_failure_backs_off_without_contacting_upstream():
+    """Inside the backoff window calls fail fast with ProxyBackoffError and open no session."""
+    provider = _coalescing_provider(backoff=BackoffPolicy(base_s=60.0, max_s=60.0, max_attempts=0))
+    counter = {"calls": 0}
+    with patch.object(ProxyProvider, "_list_prompts", _always_failing(counter)):
+        with pytest.raises(RuntimeError, match="405"):
+            await provider._list_prompts()
+        for _ in range(20):
+            with pytest.raises(ProxyBackoffError, match="backing off"):
+                await provider._list_prompts()
+    assert counter["calls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_backoff_window_expires_and_kinds_are_independent():
+    """After the window a retry reaches upstream; a failing kind never blocks another kind."""
+    provider = _coalescing_provider(backoff=BackoffPolicy(base_s=60.0, max_s=60.0, max_attempts=0))
+    counter = {"calls": 0}
+
+    async def ok_tools(self):
+        """Healthy tools listing."""
+        return ["t"]
+
+    with patch.object(ProxyProvider, "_list_prompts", _always_failing(counter)), \
+         patch.object(ProxyProvider, "_list_tools", ok_tools):
+        with pytest.raises(RuntimeError):
+            await provider._list_prompts()
+        assert await provider._list_tools() == ["t"]
+        failures, _, err = provider._list_failures["prompts"]
+        provider._list_failures["prompts"] = (failures, 0.0, err)  # window elapsed
+        with pytest.raises(RuntimeError, match="405"):
+            await provider._list_prompts()
+    assert counter["calls"] == 2
+    assert provider._list_failures["prompts"][0] == 2
+
+
+@pytest.mark.asyncio
+async def test_gives_up_after_max_attempts_until_reset():
+    """The attempt cap stops reconnecting; ``reset_backoff`` re-enables it, success clears state."""
+    provider = _coalescing_provider(backoff=BackoffPolicy(base_s=0.0, max_s=0.0, max_attempts=3))
+    counter = {"calls": 0}
+    with patch.object(ProxyProvider, "_list_resources", _always_failing(counter)):
+        for _ in range(3):
+            with pytest.raises(RuntimeError, match="405"):
+                await provider._list_resources()
+        for _ in range(5):
+            with pytest.raises(ProxyBackoffError, match="gave up after 3"):
+                await provider._list_resources()
+    assert counter["calls"] == 3
+
+    async def recovered(self):
+        """Upstream is healthy again."""
+        return ["r"]
+
+    provider.reset_backoff("resources")
+    with patch.object(ProxyProvider, "_list_resources", recovered):
+        assert await provider._list_resources() == ["r"]
+    assert "resources" not in provider._list_failures
+
+
+@pytest.mark.asyncio
+async def test_exhausted_hook_fires_once_with_kind_and_count():
+    """Giving up calls the hook exactly once; later fail-fast calls never re-fire it."""
+    provider = _coalescing_provider(backoff=BackoffPolicy(base_s=0.0, max_s=0.0, max_attempts=2))
+    fired = []
+    handle = SimpleNamespace(server=SimpleNamespace(providers=[provider]))
+    assert set_exhausted_hook(handle, lambda *a: fired.append(a))
+    counter = {"calls": 0}
+    with patch.object(ProxyProvider, "_list_tools", _always_failing(counter)):
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                await provider._list_tools()
+        for _ in range(3):
+            with pytest.raises(ProxyBackoffError):
+                await provider._list_tools()
+    assert fired == [("tools", 2, "405 Method Not Allowed")]
+
+
+def test_set_exhausted_hook_ignores_handles_without_coalescing():
+    """A test double / foreign handle is a silent no-op, not an AttributeError."""
+    assert set_exhausted_hook(object(), lambda *a: None) is False
+
+
+def test_backoff_delay_is_exponential_capped_and_jittered():
+    """Delay doubles per failure, never exceeds the cap, and stays within ``[d/2, d]``."""
+    policy = BackoffPolicy(base_s=1.0, max_s=10.0, max_attempts=5)
+    for failures, full in [(1, 1.0), (2, 2.0), (3, 4.0), (4, 8.0), (5, 10.0), (9, 10.0)]:
+        for _ in range(20):
+            assert full / 2 <= policy.delay(failures) <= full
+    assert not policy.exhausted(4) and policy.exhausted(5)
+    assert not BackoffPolicy(max_attempts=0).exhausted(10_000)
+    # Retry-forever mode must not overflow int->float after ~1024 failures.
+    assert 150.0 <= BackoffPolicy(max_s=300.0, max_attempts=0).delay(5_000) <= 300.0
+
+
+def test_proxy_backoff_reads_config_and_clamps(caplog):
+    """``graph.proxy_reconnect_*`` keys configure the policy; negatives clamp with a warning."""
+    registry = SimpleNamespace(server={"graph": {
+        "proxy_reconnect_base_s": 2, "proxy_reconnect_max_s": 30, "proxy_reconnect_max_attempts": 7,
+    }})
+    with patch("utils.config_registry.get_config_registry", return_value=registry):
+        policy = _proxy_backoff()
+    assert (policy.base_s, policy.max_s, policy.max_attempts) == (2.0, 30.0, 7)
+
+    registry = SimpleNamespace(server={"graph": {"proxy_reconnect_max_attempts": -1}})
+    with caplog.at_level("WARNING", logger="whiskers.plugins"), \
+         patch("utils.config_registry.get_config_registry", return_value=registry):
+        policy = _proxy_backoff()
+    assert (policy.base_s, policy.max_s, policy.max_attempts) == (2.0, 300.0, 0)
+    assert "clamping" in caplog.text
 
 
 def test_build_proxy_wires_bounded_transport_and_coalescing_provider():

@@ -11,8 +11,9 @@ from sqlalchemy import select, update
 
 import core.context as ctx
 from db_layer.connection import get_async_session
-from core.proxy.models import ProxyServer
-from core.proxy.compose import build_proxy, mount_proxy, unmount_proxy
+from core.proxy.models import ProxyServer, ProxyUnavailableEvent
+from core.proxy.compose import build_proxy, mount_proxy, set_exhausted_hook, unmount_proxy
+from utils.tasks import spawn_supervised
 from core.proxy import ssrf_safety
 
 # Keep re-exports for test compatibility or other packages
@@ -53,6 +54,11 @@ class ProxyManager(IProxyManager):
     def __init__(self):
         """Initialize the proxy manager with an empty active handles dictionary."""
         self._active_handles = {}  # name -> provider_handle
+        self._proxy_locks: dict[str, asyncio.Lock] = {}  # serializes unavailable cleanup vs reconnect
+
+    def _proxy_lock(self, name: str) -> asyncio.Lock:
+        """Return the per-proxy lock shared by ``_mark_unavailable`` and ``test_proxy``."""
+        return self._proxy_locks.setdefault(name, asyncio.Lock())
 
 
     def subscribe(self, events) -> None:
@@ -251,6 +257,7 @@ class ProxyManager(IProxyManager):
 
         mount_proxy(ctx.mcp, provider, proxy.name)
         self._active_handles[proxy.name] = provider
+        self._watch_upstream(proxy.name, provider)
         _bump_tool_meta_version()
 
         _register_proxy_scopes(proxy.name)
@@ -299,6 +306,60 @@ class ProxyManager(IProxyManager):
             )
             await session_write.commit()
         return True
+
+    def _watch_upstream(self, name: str, provider: Any) -> None:
+        """Mark the proxy unavailable once its upstream tools listing exhausts reconnect attempts."""
+
+        def on_exhausted(kind: str, failures: int, error: str) -> None:
+            # A prompts/resources list an upstream simply doesn't serve (405) is not an outage.
+            if kind != "tools":
+                return
+            spawn_supervised(
+                self._mark_unavailable(name, provider, failures, error),
+                name=f"proxy-unavailable:{name}",
+            )
+
+        set_exhausted_hook(provider, on_exhausted)
+
+    async def _mark_unavailable(self, name: str, provider: Any, failures: int, error: str) -> None:
+        """Unmount a dead proxy, flag its row ``error`` with a reconnect request, emit ``proxy.unavailable``."""
+        async with self._proxy_lock(name):
+            await self._mark_unavailable_locked(name, provider, failures, error)
+
+    async def _mark_unavailable_locked(self, name: str, provider: Any, failures: int, error: str) -> None:
+        """``_mark_unavailable`` body; caller holds the proxy lock so a reconnect can't interleave."""
+        if self._active_handles.get(name) is not provider:
+            return  # already reconnected, disabled or removed since the hook fired
+        try:
+            unmount_proxy(ctx.mcp, provider, namespace=name)
+        except Exception as exc:
+            logger.error("ProxyManager: unmount of unavailable proxy %s failed: %s", name, exc)
+        self._active_handles.pop(name, None)
+        _bump_tool_meta_version()
+        self._remove_proxy_routes(name)
+        _clear_proxy_scopes(name)
+
+        message = (
+            f"Upstream unavailable after {failures} failed tools/list attempts; "
+            f"reconnect required (run Test to reconnect): {error}"
+        )
+        logger.error("ProxyManager: proxy %s marked unavailable: %s", name, error)
+        async with get_async_session() as session:
+            await session.execute(
+                update(ProxyServer)
+                .where(ProxyServer.name == name)
+                .values(status="error", error_message=message)
+            )
+            await session.commit()
+
+        try:
+            from core.plugin_loader.plugin_registry import get_registry
+            get_registry().events.emit(
+                "proxy.unavailable",
+                ProxyUnavailableEvent(name=name, failures=failures, error=error),
+            )
+        except Exception as ev_err:
+            logger.debug("EventBus emit skipped: %s", ev_err)
 
     async def enable_proxy(self, name: str) -> None:
         """Re-mount a persisted proxy without deleting its DB row or vault secrets."""
@@ -607,6 +668,7 @@ class ProxyManager(IProxyManager):
             # Mount live
             mount_proxy(ctx.mcp, provider, name)
             self._active_handles[name] = provider
+            self._watch_upstream(name, provider)
 
             _register_proxy_scopes(name)
 
@@ -731,6 +793,11 @@ class ProxyManager(IProxyManager):
 
     async def test_proxy(self, name: str) -> Dict[str, Any]:
         """Re-connect, refresh toolCount, update status and errors in DB."""
+        async with self._proxy_lock(name):
+            return await self._test_proxy_locked(name)
+
+    async def _test_proxy_locked(self, name: str) -> Dict[str, Any]:
+        """``test_proxy`` body; caller holds the proxy lock."""
         async with get_async_session() as session:
             stmt = select(ProxyServer).where(ProxyServer.name == name)
             proxy = (await session.execute(stmt)).scalar_one_or_none()
@@ -780,6 +847,7 @@ class ProxyManager(IProxyManager):
                 
                 mount_proxy(ctx.mcp, provider, name)
                 self._active_handles[name] = provider
+                self._watch_upstream(name, provider)
 
                 _register_proxy_scopes(name)
 
