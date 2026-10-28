@@ -10,12 +10,17 @@ initialize + GET stream + call + DELETE, each with its own ``httpx2.AsyncClient`
 - ``tools``/``prompts``/``resources`` listings are coalesced (concurrent misses
   share one upstream fetch) and served from a short TTL memo, so neither a burst
   of front ``tools/list`` calls nor ``ProxyProvider``'s 300s lookup-cache expiry
-  re-downloads the upstream catalog once per caller.
+  re-downloads the upstream catalog once per caller;
+- a failed listing backs off exponentially per list kind (fail fast inside the
+  window, no upstream session opened) and stops reconnecting after
+  ``proxy_reconnect_max_attempts`` consecutive failures, so an upstream that keeps
+  answering 405 cannot be hammered by every front ``*/list`` call.
 """
 
 import asyncio
 import contextlib
 import logging
+import random
 import ssl
 import time
 from typing import Any, Awaitable, Callable
@@ -31,6 +36,9 @@ logger = logging.getLogger("whiskers.plugins")
 
 _DEFAULT_MAX_CONCURRENT_SESSIONS = 8
 _DEFAULT_LIST_CACHE_TTL_S = 60.0
+_DEFAULT_RECONNECT_BASE_S = 2.0
+_DEFAULT_RECONNECT_MAX_S = 300.0
+_DEFAULT_RECONNECT_MAX_ATTEMPTS = 6
 
 
 def _config_number(graph: dict, key: str, default: Any, cast: Callable[[Any], Any], floor: Any) -> Any:
@@ -47,17 +55,70 @@ def _config_number(graph: dict, key: str, default: Any, cast: Callable[[Any], An
     return value
 
 
-def _proxy_limits() -> tuple[int, float]:
-    """Return ``(max_concurrent_sessions, list_cache_ttl_s)`` from ``graph`` config, with defaults."""
+def _graph_config() -> dict:
+    """Return the server ``graph`` config block, or ``{}`` when the registry is unavailable."""
     try:
         from utils.config_registry import get_config_registry
-        graph = get_config_registry().server.get("graph", {}) or {}
+        return get_config_registry().server.get("graph", {}) or {}
     except Exception:
         logger.debug("proxy limits config unavailable; using defaults", exc_info=True)
-        graph = {}
+        return {}
+
+
+def _proxy_limits() -> tuple[int, float]:
+    """Return ``(max_concurrent_sessions, list_cache_ttl_s)`` from ``graph`` config, with defaults."""
+    graph = _graph_config()
     sessions = _config_number(graph, "proxy_max_concurrent_sessions", _DEFAULT_MAX_CONCURRENT_SESSIONS, int, 1)
     ttl = _config_number(graph, "proxy_list_cache_ttl_s", _DEFAULT_LIST_CACHE_TTL_S, float, 0.0)
     return sessions, ttl
+
+
+class BackoffPolicy:
+    """Exponential reconnect backoff: ``base * 2**(n-1)`` capped at ``max_s``, full jitter on top half.
+
+    ``max_attempts`` consecutive failures stop reconnecting entirely; ``0`` means retry forever.
+    """
+
+    __slots__ = ("base_s", "max_s", "max_attempts")
+
+    def __init__(
+        self,
+        base_s: float = _DEFAULT_RECONNECT_BASE_S,
+        max_s: float = _DEFAULT_RECONNECT_MAX_S,
+        max_attempts: int = _DEFAULT_RECONNECT_MAX_ATTEMPTS,
+    ):
+        self.base_s = base_s
+        self.max_s = max(max_s, base_s)
+        self.max_attempts = max_attempts
+
+    def delay(self, failures: int) -> float:
+        """Seconds to wait after the ``failures``-th consecutive failure (jittered in ``[d/2, d]``)."""
+        d = min(self.base_s * (2 ** max(failures - 1, 0)), self.max_s)
+        return d / 2 + random.random() * d / 2
+
+    def exhausted(self, failures: int) -> bool:
+        """True once ``failures`` reached the attempt cap (never, when the cap is 0)."""
+        return self.max_attempts > 0 and failures >= self.max_attempts
+
+
+def _proxy_backoff() -> BackoffPolicy:
+    """Build the reconnect ``BackoffPolicy`` from ``graph.proxy_reconnect_*`` config, with defaults."""
+    graph = _graph_config()
+    return BackoffPolicy(
+        base_s=_config_number(graph, "proxy_reconnect_base_s", _DEFAULT_RECONNECT_BASE_S, float, 0.0),
+        max_s=_config_number(graph, "proxy_reconnect_max_s", _DEFAULT_RECONNECT_MAX_S, float, 0.0),
+        max_attempts=_config_number(
+            graph, "proxy_reconnect_max_attempts", _DEFAULT_RECONNECT_MAX_ATTEMPTS, int, 0
+        ),
+    )
+
+
+class ProxyBackoffError(RuntimeError):
+    """Raised without contacting upstream while a list kind is backing off or has given up."""
+
+
+# (kind, consecutive_failures, last_error) -> None; fired once when a kind gives up.
+ExhaustedHook = Callable[[str, int, str], None]
 
 
 _shared_ssl_ctx: ssl.SSLContext | None = None
@@ -118,20 +179,75 @@ class BoundedSSETransport(_SessionGateMixin, SSETransport):
 
 
 class CoalescingProxyProvider(ProxyProvider):
-    """``ProxyProvider`` whose list fetches are single-flight and briefly memoized.
+    """``ProxyProvider`` whose list fetches are single-flight, briefly memoized, and backed off.
 
-    Errors are never memoized; a waiter's cancellation never cancels the shared fetch.
+    Errors are never memoized as results; a waiter's cancellation never cancels the shared
+    fetch. Consecutive failures of one list kind schedule its next upstream attempt with
+    exponential backoff and stop reconnecting after the policy's attempt cap; one success
+    (or ``reset_backoff``) clears it.
     """
 
     _list_ttl_s: float
     _list_memo: dict[str, tuple[float, Any]]
     _list_inflight: dict[str, asyncio.Future]
+    _backoff: BackoffPolicy
+    # kind -> (consecutive_failures, retry_at_monotonic, last_error_text)
+    _list_failures: dict[str, tuple[int, float, str]]
+    _on_exhausted: ExhaustedHook | None
 
-    def _init_coalescing(self, ttl_s: float) -> None:
-        """Initialize memo state (called after the in-place class swap in ``build_proxy``)."""
+    def _init_coalescing(self, ttl_s: float, backoff: BackoffPolicy | None = None) -> None:
+        """Initialize memo + backoff state (called after the in-place class swap in ``build_proxy``)."""
         self._list_ttl_s = ttl_s
         self._list_memo = {}
         self._list_inflight = {}
+        self._backoff = backoff or BackoffPolicy()
+        self._list_failures = {}
+        self._on_exhausted = None
+
+    def reset_backoff(self, kind: str | None = None) -> None:
+        """Forget failure history for one list kind (or all), re-enabling upstream attempts."""
+        if kind is None:
+            self._list_failures.clear()
+        else:
+            self._list_failures.pop(kind, None)
+
+    def _check_backoff(self, kind: str) -> None:
+        """Raise ``ProxyBackoffError`` when ``kind`` has given up or is inside its retry window."""
+        state = self._list_failures.get(kind)
+        if state is None:
+            return
+        failures, retry_at, last_error = state
+        if self._backoff.exhausted(failures):
+            raise ProxyBackoffError(
+                f"upstream {kind} list gave up after {failures} failed attempts: {last_error}"
+            )
+        remaining = retry_at - time.monotonic()
+        if remaining > 0:
+            raise ProxyBackoffError(
+                f"upstream {kind} list backing off {remaining:.1f}s "
+                f"after {failures} failure(s): {last_error}"
+            )
+
+    def _record_failure(self, kind: str, exc: BaseException) -> None:
+        """Bump ``kind``'s consecutive-failure count and schedule its next allowed attempt."""
+        failures = self._list_failures.get(kind, (0, 0.0, ""))[0] + 1
+        delay = self._backoff.delay(failures)
+        self._list_failures[kind] = (failures, time.monotonic() + delay, str(exc)[:500])
+        if self._backoff.exhausted(failures):
+            logger.error(
+                "Proxy upstream %s list failed %d times; giving up until reset: %s",
+                kind, failures, exc,
+            )
+            if self._on_exhausted is not None:
+                try:
+                    self._on_exhausted(kind, failures, self._list_failures[kind][2])
+                except Exception:
+                    logger.exception("Proxy exhausted hook failed for %s list", kind)
+        else:
+            logger.warning(
+                "Proxy upstream %s list failed (attempt %d); next retry in %.1fs: %s",
+                kind, failures, delay, exc,
+            )
 
     async def _coalesced(self, kind: str, fetch: Callable[[], Awaitable[Any]]) -> Any:
         """Return a fresh memo hit, else join (or start) the one in-flight upstream fetch."""
@@ -140,6 +256,7 @@ class CoalescingProxyProvider(ProxyProvider):
             return hit[1]
         task = self._list_inflight.get(kind)
         if task is None:
+            self._check_backoff(kind)  # fail fast: no upstream session while backing off
             task = asyncio.ensure_future(fetch())
             self._list_inflight[kind] = task
             task.add_done_callback(lambda t, k=kind: self._finish_fetch(k, t))
@@ -151,8 +268,12 @@ class CoalescingProxyProvider(ProxyProvider):
             del self._list_inflight[kind]
         if task.cancelled():
             return
-        if task.exception() is None:  # also marks a failure retrieved if every waiter left
+        exc = task.exception()  # also marks a failure retrieved if every waiter left
+        if exc is None:
             self._list_memo[kind] = (time.monotonic(), task.result())
+            self._list_failures.pop(kind, None)
+        else:
+            self._record_failure(kind, exc)
 
     async def _list_tools(self):
         """List upstream tools via the coalesced, TTL-memoized fetch."""
@@ -171,12 +292,26 @@ class CoalescingProxyProvider(ProxyProvider):
         return await self._coalesced("prompts", super()._list_prompts)
 
 
-def _install_coalescing(proxy_server: FastMCP, ttl_s: float) -> bool:
+def set_exhausted_hook(provider: Any, hook: ExhaustedHook | None) -> bool:
+    """Attach ``hook`` to the ``CoalescingProxyProvider`` inside a ``build_proxy`` handle.
+
+    Returns False (no-op) when the handle has none, e.g. a test double.
+    """
+    for inner in getattr(getattr(provider, "server", None), "providers", None) or ():
+        if isinstance(inner, CoalescingProxyProvider):
+            inner._on_exhausted = hook
+            return True
+    return False
+
+
+def _install_coalescing(
+    proxy_server: FastMCP, ttl_s: float, backoff: BackoffPolicy | None = None
+) -> bool:
     """Upgrade the proxy server's ``ProxyProvider`` in place (shared with ProxyMetadataMiddleware)."""
     for provider in getattr(proxy_server, "providers", None) or ():
         if type(provider) is ProxyProvider:
             provider.__class__ = CoalescingProxyProvider
-            provider._init_coalescing(ttl_s)
+            provider._init_coalescing(ttl_s, backoff)
             return True
     logger.warning("build_proxy: no ProxyProvider found; upstream list coalescing disabled")
     return False
@@ -296,7 +431,7 @@ def build_proxy(
     proxy_server = create_proxy(
         proxy_client, name=name, provider_error_strategy="raise"
     )
-    _install_coalescing(proxy_server, list_ttl_s)
+    _install_coalescing(proxy_server, list_ttl_s, _proxy_backoff())
 
     provider = FastMCPProvider(proxy_server)
     return provider

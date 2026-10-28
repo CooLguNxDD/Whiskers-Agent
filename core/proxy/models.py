@@ -1,5 +1,6 @@
-"""SQLAlchemy ORM model for ProxyServer."""
+"""SQLAlchemy ORM model for ProxyServer, plus proxy EventBus payloads."""
 
+from pydantic import BaseModel
 from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, func, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from db_layer.models import Base
@@ -24,3 +25,11 @@ class ProxyServer(Base):
     workspace_label = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ProxyUnavailableEvent(BaseModel):
+    """``proxy.unavailable`` payload: upstream tools listing exhausted its reconnect attempts."""
+
+    name: str
+    failures: int
+    error: str
