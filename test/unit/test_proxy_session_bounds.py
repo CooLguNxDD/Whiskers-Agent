@@ -635,3 +635,33 @@ async def test_shared_factory_builds_the_memo_client():
         client = compose._shared_http_client_factory()
     async with client:
         assert isinstance(client, compose._get_get405_client_cls())
+
+
+@pytest.mark.asyncio
+async def test_global_gate_timeout_does_not_trip_the_proxy_breaker():
+    """A saturated global gate is other proxies' load: proxy A's breaker stays closed."""
+    registry = SimpleNamespace(server={"graph": {
+        "proxy_max_total_sessions": 1, "proxy_session_acquire_timeout_s": 0.1,
+    }})
+    release = asyncio.Event()
+    with patch.object(compose, "_global_gate", None), \
+         patch("utils.config_registry.get_config_registry", return_value=registry), \
+         patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        busy = BoundedStreamableHttpTransport("http://b.test/mcp")
+        healthy = BoundedStreamableHttpTransport("http://a.test/mcp")
+
+        async def hog():
+            """Hold the only global slot from proxy B."""
+            async with busy.connect_session():
+                await release.wait()
+
+        holder = asyncio.ensure_future(hog())
+        await asyncio.sleep(0.01)
+        with pytest.raises(compose.ProxyBusyError) as info:
+            async with healthy.connect_session():
+                pass
+        assert info.value.timed_out and info.value.gate == "global"
+        release.set()
+        await holder
+    assert healthy._breaker.failures == 0
+    assert healthy._session_gate.open == 0  # per-proxy slot released after the global timeout

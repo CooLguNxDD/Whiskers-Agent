@@ -234,9 +234,10 @@ def _shared_http_client_factory(
 class ProxyBusyError(RuntimeError):
     """Raised when an upstream session slot is unavailable: queue full or acquire timed out."""
 
-    def __init__(self, message: str, *, timed_out: bool = False):
+    def __init__(self, message: str, *, timed_out: bool = False, gate: str = ""):
         super().__init__(message)
         self.timed_out = timed_out
+        self.gate = gate  # label of the SessionGate that rejected
 
 
 def _gate_limits() -> tuple[int, float]:
@@ -271,7 +272,9 @@ class SessionGate:
                 "Proxy session gate %s busy (%s): open=%d/%d waiting=%d/%d",
                 self.label, reason, self.open, self.limit, self.waiting, self.max_waiters,
             )
-        return ProxyBusyError(f"upstream session gate {self.label} busy: {reason}", timed_out=timed_out)
+        return ProxyBusyError(
+            f"upstream session gate {self.label} busy: {reason}", timed_out=timed_out, gate=self.label
+        )
 
     @contextlib.asynccontextmanager
     async def slot(self):
@@ -428,7 +431,9 @@ class _SessionGateMixin:
                 async with super().connect_session(**kwargs) as session:  # type: ignore[misc]
                     yield session
         except ProxyBusyError as exc:
-            if exc.timed_out:  # a slot that never frees means hung upstream sessions
+            # Only this proxy's own gate timing out says anything about this upstream
+            # (its slots never free = hung sessions); a full global gate is other proxies' load.
+            if exc.timed_out and exc.gate == self._session_gate.label:
                 self._breaker.failure(exc, generation)
             raise  # a full queue is load shedding, not an upstream fault
         except Exception as exc:
