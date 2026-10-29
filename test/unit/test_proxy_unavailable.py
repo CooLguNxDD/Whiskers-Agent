@@ -119,3 +119,15 @@ async def test_test_proxy_takes_the_proxy_lock():
     assert await manager.test_proxy("notion") == {"ok": True}
     assert seen["locked"] is True
     assert not manager._proxy_lock("notion").locked()
+
+
+def test_watch_upstream_session_exhaustion_marks_unavailable():
+    """The transport circuit breaker giving up unmounts the proxy like a dead tools listing."""
+    manager = pm.ProxyManager()
+    hooks = []
+    with patch.object(pm, "set_exhausted_hook", lambda p, h: hooks.append(h)), \
+         patch.object(pm, "spawn_supervised") as spawn:
+        manager._watch_upstream("notion", object())
+        hooks[0]("session", 6, "401")
+    spawn.assert_called_once()
+    spawn.call_args.args[0].close()  # never awaited in this test

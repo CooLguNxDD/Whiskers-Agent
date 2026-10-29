@@ -308,25 +308,29 @@ class ProxyManager(IProxyManager):
         return True
 
     def _watch_upstream(self, name: str, provider: Any) -> None:
-        """Mark the proxy unavailable once its upstream tools listing exhausts reconnect attempts."""
+        """Mark the proxy unavailable once its tools listing or its sessions exhaust reconnect attempts."""
 
         def on_exhausted(kind: str, failures: int, error: str) -> None:
             # A prompts/resources list an upstream simply doesn't serve (405) is not an outage.
-            if kind != "tools":
+            if kind not in ("tools", "session"):
                 return
             spawn_supervised(
-                self._mark_unavailable(name, provider, failures, error),
+                self._mark_unavailable(name, provider, failures, error, kind=kind),
                 name=f"proxy-unavailable:{name}",
             )
 
         set_exhausted_hook(provider, on_exhausted)
 
-    async def _mark_unavailable(self, name: str, provider: Any, failures: int, error: str) -> None:
+    async def _mark_unavailable(
+        self, name: str, provider: Any, failures: int, error: str, *, kind: str = "tools"
+    ) -> None:
         """Unmount a dead proxy, flag its row ``error`` with a reconnect request, emit ``proxy.unavailable``."""
         async with self._proxy_lock(name):
-            await self._mark_unavailable_locked(name, provider, failures, error)
+            await self._mark_unavailable_locked(name, provider, failures, error, kind=kind)
 
-    async def _mark_unavailable_locked(self, name: str, provider: Any, failures: int, error: str) -> None:
+    async def _mark_unavailable_locked(
+        self, name: str, provider: Any, failures: int, error: str, *, kind: str = "tools"
+    ) -> None:
         """``_mark_unavailable`` body; caller holds the proxy lock so a reconnect can't interleave."""
         if self._active_handles.get(name) is not provider:
             return  # already reconnected, disabled or removed since the hook fired
@@ -339,9 +343,10 @@ class ProxyManager(IProxyManager):
         self._remove_proxy_routes(name)
         _clear_proxy_scopes(name)
 
+        what = "upstream sessions" if kind == "session" else "tools/list attempts"
         message = (
-            f"Upstream unavailable after {failures} failed tools/list attempts; "
-            f"reconnect required (run Test to reconnect): {error}"
+            f"Upstream unavailable after {failures} failed {what}; "
+            f"reconnect required (auto-reconnect retries, or run Reconnect): {error}"
         )
         logger.error("ProxyManager: proxy %s marked unavailable: %s", name, error)
         async with get_async_session() as session:
@@ -356,7 +361,7 @@ class ProxyManager(IProxyManager):
             from core.plugin_loader.plugin_registry import get_registry
             get_registry().events.emit(
                 "proxy.unavailable",
-                ProxyUnavailableEvent(name=name, failures=failures, error=error),
+                ProxyUnavailableEvent(name=name, failures=failures, error=error, kind=kind),
             )
         except Exception as ev_err:
             logger.debug("EventBus emit skipped: %s", ev_err)
@@ -419,6 +424,14 @@ class ProxyManager(IProxyManager):
                 .values(status="inactive")
             )
             await session.commit()
+
+    async def errored_proxy_names(self) -> List[str]:
+        """Names of proxies whose row is ``status="error"`` (auto-reconnect candidates)."""
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(ProxyServer.name).where(ProxyServer.status == "error")
+            )
+            return [row[0] for row in result.all()]
 
     async def load_persisted(self) -> None:
         """Boot-time re-mount of every active row in the proxy_servers table."""
