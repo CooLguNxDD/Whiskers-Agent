@@ -5,8 +5,15 @@ initialize + GET stream + call + DELETE, each with its own ``httpx2.AsyncClient`
 
 - every session's client reuses one shared TLS context instead of re-loading the
   CA bundle (~1.4 MB + CPU per client);
-- a per-proxy semaphore caps concurrently open upstream sessions so agent fan-out
-  queues instead of stacking hundreds of live sessions;
+- a per-proxy gate plus one global gate cap concurrently open upstream sessions;
+  the queue behind each gate is bounded too (``proxy_max_queued_sessions``) and a
+  waiter gives up after ``proxy_session_acquire_timeout_s`` with ``ProxyBusyError``,
+  so agent fan-out is shed instead of piling up unbounded waiters (the cap alone
+  only moved the OOM from open sessions into the queue);
+- a per-proxy circuit breaker counts upstream session failures (connect,
+  initialize, transport errors, acquire timeouts) on *every* path, tool calls
+  included; while open it rejects without queueing, and once it gives up it fires
+  the same exhausted hook as the list backoff so ``ProxyManager`` unmounts the proxy;
 - ``tools``/``prompts``/``resources`` listings are coalesced (concurrent misses
   share one upstream fetch) and served from a short TTL memo, so neither a burst
   of front ``tools/list`` calls nor ``ProxyProvider``'s 300s lookup-cache expiry
@@ -23,6 +30,7 @@ import logging
 import random
 import ssl
 import time
+import weakref
 from typing import Any, Awaitable, Callable
 
 from fastmcp import FastMCP
@@ -39,6 +47,10 @@ _DEFAULT_LIST_CACHE_TTL_S = 60.0
 _DEFAULT_RECONNECT_BASE_S = 2.0
 _DEFAULT_RECONNECT_MAX_S = 300.0
 _DEFAULT_RECONNECT_MAX_ATTEMPTS = 6
+_DEFAULT_MAX_QUEUED_SESSIONS = 16
+_DEFAULT_SESSION_ACQUIRE_TIMEOUT_S = 15.0
+_DEFAULT_MAX_TOTAL_SESSIONS = 16
+_BUSY_LOG_INTERVAL_S = 60.0
 
 
 def _config_number(graph: dict, key: str, default: Any, cast: Callable[[Any], Any], floor: Any) -> Any:
@@ -151,33 +163,241 @@ def _shared_http_client_factory(
     )
 
 
-class _SessionGateMixin:
-    """Caps concurrently open upstream sessions per proxy (``Client.new()`` shares the transport)."""
+class ProxyBusyError(RuntimeError):
+    """Raised when an upstream session slot is unavailable: queue full or acquire timed out."""
 
-    _session_gate: asyncio.Semaphore
+    def __init__(self, message: str, *, timed_out: bool = False):
+        super().__init__(message)
+        self.timed_out = timed_out
+
+
+def _gate_limits() -> tuple[int, float]:
+    """Return ``(max_queued_sessions, session_acquire_timeout_s)`` from ``graph`` config."""
+    graph = _graph_config()
+    queued = _config_number(graph, "proxy_max_queued_sessions", _DEFAULT_MAX_QUEUED_SESSIONS, int, 0)
+    timeout = _config_number(
+        graph, "proxy_session_acquire_timeout_s", _DEFAULT_SESSION_ACQUIRE_TIMEOUT_S, float, 0.1
+    )
+    return queued, timeout
+
+
+class SessionGate:
+    """Semaphore with a bounded wait queue and an acquire timeout; tracks open/waiting counts."""
+
+    def __init__(self, label: str, limit: int, max_waiters: int, timeout_s: float):
+        self.label = label
+        self.limit = limit
+        self.max_waiters = max_waiters
+        self.timeout_s = timeout_s
+        self.open = 0
+        self.waiting = 0
+        self._sem = asyncio.Semaphore(limit)
+        self._last_busy_log = 0.0
+
+    def _busy(self, reason: str, *, timed_out: bool = False) -> ProxyBusyError:
+        """Build the rejection, logging at most once per ``_BUSY_LOG_INTERVAL_S``."""
+        now = time.monotonic()
+        if now - self._last_busy_log >= _BUSY_LOG_INTERVAL_S:
+            self._last_busy_log = now
+            logger.warning(
+                "Proxy session gate %s busy (%s): open=%d/%d waiting=%d/%d",
+                self.label, reason, self.open, self.limit, self.waiting, self.max_waiters,
+            )
+        return ProxyBusyError(f"upstream session gate {self.label} busy: {reason}", timed_out=timed_out)
+
+    @contextlib.asynccontextmanager
+    async def slot(self):
+        """Hold one slot for the block; reject instead of queueing past the caps."""
+        if self._sem.locked() and self.waiting >= self.max_waiters:
+            raise self._busy("queue full")
+        self.waiting += 1
+        try:
+            async with asyncio.timeout(self.timeout_s):
+                await self._sem.acquire()
+        except TimeoutError:
+            raise self._busy(f"no slot within {self.timeout_s:g}s", timed_out=True) from None
+        finally:
+            self.waiting -= 1
+        self.open += 1
+        try:
+            yield
+        finally:
+            self.open -= 1
+            self._sem.release()
+
+
+# One gate across every proxy, so N proxies cannot hold N * per-proxy-cap sessions.
+# Rebuilt per event loop (a Semaphore binds to the loop it first waits on).
+_global_gate: SessionGate | None = None
+_global_gate_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_global_gate() -> SessionGate:
+    """Return the process-wide upstream session gate for the running loop."""
+    global _global_gate, _global_gate_loop
+    loop = asyncio.get_running_loop()
+    if _global_gate is None or _global_gate_loop is not loop:
+        total = _config_number(
+            _graph_config(), "proxy_max_total_sessions", _DEFAULT_MAX_TOTAL_SESSIONS, int, 1
+        )
+        queued, timeout = _gate_limits()
+        # Every proxy's queue drains into this gate, so give it room for several proxies.
+        _global_gate = SessionGate("global", total, max(queued * 4, total), timeout)
+        _global_gate_loop = loop
+    return _global_gate
+
+
+# Live transports, for the ``proxy_sessions_*`` telemetry gauges.
+_live_transports: "weakref.WeakSet[_SessionGateMixin]" = weakref.WeakSet()
+
+
+def session_stats() -> dict[str, int]:
+    """Aggregate open/waiting upstream sessions and open breakers across live proxy transports."""
+    gates = [t._session_gate for t in list(_live_transports)]
+    return {
+        "open": sum(g.open for g in gates),
+        "waiting": sum(g.waiting for g in gates),
+        "breakers_open": sum(1 for t in list(_live_transports) if t._breaker.is_open()),
+    }
+
+
+class CircuitBreaker:
+    """Consecutive upstream session failures -> fail fast inside a backoff window, then give up.
+
+    Failures are counted per *generation*: sessions admitted together that then fail
+    together (one upstream outage hitting a burst) count once, so a single bad burst
+    cannot exhaust the attempt cap on its own.
+    """
+
+    def __init__(self, label: str, backoff: BackoffPolicy | None = None):
+        self.label = label
+        self.backoff = backoff or BackoffPolicy()
+        self.failures = 0
+        self.retry_at = 0.0
+        self.last_error = ""
+        self.generation = 0
+        self.on_exhausted: ExhaustedHook | None = None
+
+    def is_open(self) -> bool:
+        """True while calls are rejected (inside the window, or given up)."""
+        if self.failures == 0:
+            return False
+        return self.backoff.exhausted(self.failures) or time.monotonic() < self.retry_at
+
+    def check(self) -> int:
+        """Return the admitting generation; raise ``ProxyBackoffError`` while the breaker is open."""
+        if self.failures == 0:
+            return self.generation
+        if self.backoff.exhausted(self.failures):
+            raise ProxyBackoffError(
+                f"upstream {self.label} gave up after {self.failures} failed sessions: {self.last_error}"
+            )
+        remaining = self.retry_at - time.monotonic()
+        if remaining > 0:
+            raise ProxyBackoffError(
+                f"upstream {self.label} backing off {remaining:.1f}s "
+                f"after {self.failures} failed session(s): {self.last_error}"
+            )
+        return self.generation
+
+    def success(self) -> None:
+        """Close the breaker."""
+        if self.failures:
+            self.generation += 1
+        self.failures = 0
+        self.retry_at = 0.0
+
+    def failure(self, exc: BaseException, generation: int) -> None:
+        """Count a failed session admitted in ``generation``; fire ``on_exhausted`` once at the cap."""
+        if generation != self.generation or self.backoff.exhausted(self.failures):
+            return  # same burst already counted, or already gave up: never re-fire the hook
+        self.generation += 1
+        self.failures += 1
+        delay = self.backoff.delay(self.failures)
+        self.retry_at = time.monotonic() + delay
+        self.last_error = str(exc)[:500] or type(exc).__name__
+        if self.backoff.exhausted(self.failures):
+            logger.error(
+                "Proxy upstream %s: %d consecutive failed sessions; giving up until reconnect: %s",
+                self.label, self.failures, self.last_error,
+            )
+            if self.on_exhausted is not None:
+                try:
+                    self.on_exhausted("session", self.failures, self.last_error)
+                except Exception:
+                    logger.exception("Proxy exhausted hook failed for %s sessions", self.label)
+        else:
+            logger.warning(
+                "Proxy upstream %s session failed (attempt %d); next retry in %.1fs: %s",
+                self.label, self.failures, delay, self.last_error,
+            )
+
+
+class _SessionGateMixin:
+    """Caps, bounds the queue for, and circuit-breaks upstream sessions per proxy.
+
+    ``Client.new()`` shares the transport, so every proxied request passes through here.
+    """
+
+    _session_gate: SessionGate
+    _breaker: CircuitBreaker
+
+    def _init_gate(self, url: str, max_sessions: int, backoff: BackoffPolicy | None) -> None:
+        """Build the per-proxy gate and breaker (called from the transport ``__init__``)."""
+        queued, timeout = _gate_limits()
+        self._session_gate = SessionGate(url, max_sessions, queued, timeout)
+        self._breaker = CircuitBreaker(url, backoff)
+        _live_transports.add(self)
 
     @contextlib.asynccontextmanager
     async def connect_session(self, **kwargs: Any):
-        """Hold a gate slot for the whole upstream session lifetime."""
-        async with self._session_gate:
-            async with super().connect_session(**kwargs) as session:  # type: ignore[misc]
-                yield session
+        """Hold a per-proxy and a global slot for the whole upstream session lifetime."""
+        generation = self._breaker.check()  # open breaker: fail fast, no queue, no upstream session
+        try:
+            async with self._session_gate.slot(), _get_global_gate().slot():
+                # FastMCP runs this context in its session-runner task: initialize and
+                # transport errors raise through it; a caller's tool error does not.
+                async with super().connect_session(**kwargs) as session:  # type: ignore[misc]
+                    yield session
+        except ProxyBusyError as exc:
+            if exc.timed_out:  # a slot that never frees means hung upstream sessions
+                self._breaker.failure(exc, generation)
+            raise  # a full queue is load shedding, not an upstream fault
+        except Exception as exc:
+            self._breaker.failure(exc, generation)
+            raise
+        else:
+            self._breaker.success()
 
 
 class BoundedStreamableHttpTransport(_SessionGateMixin, StreamableHttpTransport):
-    """``StreamableHttpTransport`` with a per-proxy open-session cap and shared TLS context."""
+    """``StreamableHttpTransport`` with a bounded, circuit-broken session gate and shared TLS context."""
 
-    def __init__(self, url: str, auth: Any = None, *, max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS):
+    def __init__(
+        self,
+        url: str,
+        auth: Any = None,
+        *,
+        max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS,
+        backoff: BackoffPolicy | None = None,
+    ):
         super().__init__(url=url, auth=auth, httpx_client_factory=_shared_http_client_factory)
-        self._session_gate = asyncio.Semaphore(max_sessions)
+        self._init_gate(url, max_sessions, backoff)
 
 
 class BoundedSSETransport(_SessionGateMixin, SSETransport):
-    """``SSETransport`` with a per-proxy open-session cap and shared TLS context."""
+    """``SSETransport`` with a bounded, circuit-broken session gate and shared TLS context."""
 
-    def __init__(self, url: str, auth: Any = None, *, max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS):
+    def __init__(
+        self,
+        url: str,
+        auth: Any = None,
+        *,
+        max_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS,
+        backoff: BackoffPolicy | None = None,
+    ):
         super().__init__(url=url, auth=auth, httpx_client_factory=_shared_http_client_factory)
-        self._session_gate = asyncio.Semaphore(max_sessions)
+        self._init_gate(url, max_sessions, backoff)
 
 
 class CoalescingProxyProvider(ProxyProvider):
@@ -196,6 +416,7 @@ class CoalescingProxyProvider(ProxyProvider):
     # kind -> (consecutive_failures, retry_at_monotonic, last_error_text)
     _list_failures: dict[str, tuple[int, float, str]]
     _on_exhausted: ExhaustedHook | None
+    _session_breaker: "CircuitBreaker | None"
 
     def _init_coalescing(self, ttl_s: float, backoff: BackoffPolicy | None = None) -> None:
         """Initialize memo + backoff state (called after the in-place class swap in ``build_proxy``)."""
@@ -205,6 +426,7 @@ class CoalescingProxyProvider(ProxyProvider):
         self._backoff = backoff or BackoffPolicy()
         self._list_failures = {}
         self._on_exhausted = None
+        self._session_breaker = None
 
     def reset_backoff(self, kind: str | None = None) -> None:
         """Forget failure history for one list kind (or all), re-enabling upstream attempts."""
@@ -295,13 +517,18 @@ class CoalescingProxyProvider(ProxyProvider):
 
 
 def set_exhausted_hook(provider: Any, hook: ExhaustedHook | None) -> bool:
-    """Attach ``hook`` to the ``CoalescingProxyProvider`` inside a ``build_proxy`` handle.
+    """Attach ``hook`` to the list backoff and the session breaker inside a ``build_proxy`` handle.
+
+    The hook's ``kind`` is a list kind (``tools``/``prompts``/...) or ``"session"``.
 
     Returns False (no-op) when the handle has none, e.g. a test double.
     """
     for inner in getattr(getattr(provider, "server", None), "providers", None) or ():
         if isinstance(inner, CoalescingProxyProvider):
             inner._on_exhausted = hook
+            breaker = getattr(inner, "_session_breaker", None)
+            if breaker is not None:
+                breaker.on_exhausted = hook
             return True
     return False
 
@@ -420,10 +647,14 @@ def build_proxy(
         auth_obj = _get_relay_auth_cls()(plugin_id=plugin_id, provider="upstream", auth_header=auth_header)
 
     max_sessions, list_ttl_s = _proxy_limits()
-    if transport.lower() == "sse" or url.endswith("/sse"):
-        client_transport = BoundedSSETransport(url=url, auth=auth_obj, max_sessions=max_sessions)
-    else:
-        client_transport = BoundedStreamableHttpTransport(url=url, auth=auth_obj, max_sessions=max_sessions)
+    transport_cls = (
+        BoundedSSETransport
+        if transport.lower() == "sse" or url.endswith("/sse")
+        else BoundedStreamableHttpTransport
+    )
+    client_transport = transport_cls(
+        url=url, auth=auth_obj, max_sessions=max_sessions, backoff=_proxy_backoff()
+    )
 
     proxy_client = ProxyClient(client_transport, name=name)
 
@@ -434,6 +665,9 @@ def build_proxy(
         proxy_client, name=name, provider_error_strategy="raise"
     )
     _install_coalescing(proxy_server, list_ttl_s, _proxy_backoff())
+    for inner in proxy_server.providers:
+        if isinstance(inner, CoalescingProxyProvider):
+            inner._session_breaker = client_transport._breaker  # reached by set_exhausted_hook
 
     provider = FastMCPProvider(proxy_server)
     return provider

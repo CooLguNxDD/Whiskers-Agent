@@ -31,5 +31,7 @@ def register_all(registry: WorkerRegistry) -> None:
     checkpoint_sweeper.register(registry)
     telemetry_ttl_sweeper.register(registry)
     artifact_sweeper.register(registry)
+    from core.proxy import reconnect_worker as proxy_reconnect_worker
+    proxy_reconnect_worker.register(registry)
 
 __all__ = ["enqueue_pending", "run_worker", "stop_worker", "get_worker_registry", "register_all"]

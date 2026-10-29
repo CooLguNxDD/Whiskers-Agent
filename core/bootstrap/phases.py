@@ -206,6 +206,13 @@ async def phase_5_finalize(ctx: BootContext):
             logger.info("Phase 5 (Finalize): Artifact sweeper started")
         except Exception as exc:
             logger.warning("Phase 5 (Finalize): Failed to start artifact sweeper: %s", exc)
+
+        try:
+            from core_graph.worker import get_worker_registry
+            if get_worker_registry().start("proxy_reconnect"):
+                logger.info("Phase 5 (Finalize): Proxy auto-reconnect worker started")
+        except Exception as exc:
+            logger.warning("Phase 5 (Finalize): Failed to start proxy auto-reconnect worker: %s", exc)
             
     # Run the startup logging banner. The coroutine is injected via ctx by the
     # entrypoint — never import whiskers_agent_mcp here, as that re-executes the

@@ -710,7 +710,8 @@ export const ProxyManager: FC = () => {
                         }`}
                         style={{ marginRight: 4 }}
                       />
-                      Test
+                      {/* An errored proxy is unmounted; the same call re-mounts it. */}
+                      {proxy.status === "error" ? "Reconnect" : "Test"}
                     </button>
                     <button
                       className="ct-btn-danger"

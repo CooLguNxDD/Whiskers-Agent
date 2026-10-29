@@ -28,8 +28,16 @@ class ProxyServer(Base):
 
 
 class ProxyUnavailableEvent(BaseModel):
-    """``proxy.unavailable`` payload: upstream tools listing exhausted its reconnect attempts."""
+    """``proxy.unavailable`` payload: upstream tools listing or sessions exhausted reconnect attempts."""
 
     name: str
     failures: int
     error: str
+    kind: str = "tools"  # "tools" (list backoff) | "session" (transport circuit breaker)
+
+
+class ProxyReconnectedEvent(BaseModel):
+    """``proxy.reconnected`` payload: the auto-reconnect worker re-mounted an errored proxy."""
+
+    name: str
+    attempts: int

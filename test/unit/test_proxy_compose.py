@@ -1,7 +1,7 @@
 """Unit tests for FastMCP composition and proxy setup logic."""
 
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import ANY, patch, MagicMock, AsyncMock
 import httpx2
 from core.proxy.compose import build_proxy, mount_proxy, unmount_proxy, RelayAuth
 
@@ -28,7 +28,7 @@ def test_build_proxy_none():
 
         res = build_proxy("test-none", "http", "http://localhost/api", "none")
 
-        mock_http.assert_called_once_with(url="http://localhost/api", auth=None, max_sessions=_MAX)
+        mock_http.assert_called_once_with(url="http://localhost/api", auth=None, max_sessions=_MAX, backoff=ANY)
         mock_client.assert_called_once_with(mock_http.return_value, name="test-none")
         mock_create_proxy.assert_called_once_with(
             mock_client.return_value, name="test-none", **_CREATE_PROXY_KW
@@ -45,7 +45,7 @@ def test_build_proxy_bearer():
          patch("core.proxy.compose.FastMCPProvider") as mock_provider:
 
         build_proxy("test-bearer", "http", "http://localhost/api", "bearer", "my-token")
-        mock_http.assert_called_once_with(url="http://localhost/api", auth="my-token", max_sessions=_MAX)
+        mock_http.assert_called_once_with(url="http://localhost/api", auth="my-token", max_sessions=_MAX, backoff=ANY)
 
 
 def test_build_proxy_oauth():
@@ -98,7 +98,7 @@ def test_build_proxy_sse():
 
         build_proxy("test-sse", "sse", "http://localhost/sse-endpoint", "none")
         mock_sse.assert_called_once_with(
-            url="http://localhost/sse-endpoint", auth=None, max_sessions=_MAX
+            url="http://localhost/sse-endpoint", auth=None, max_sessions=_MAX, backoff=ANY
         )
 
 

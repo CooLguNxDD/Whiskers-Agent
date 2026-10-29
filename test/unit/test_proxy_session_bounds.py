@@ -343,3 +343,230 @@ def test_proxy_limits_clamp_below_minimum(caplog):
     with caplog.at_level("WARNING", logger="whiskers.plugins"):
         assert _limits_with({"proxy_max_concurrent_sessions": 0, "proxy_list_cache_ttl_s": -1}) == (1, 0.0)
     assert "clamping" in caplog.text
+
+
+# --- bounded queue, acquire timeout, global cap, circuit breaker -------------------------
+
+
+@contextlib.asynccontextmanager
+async def _held_session(self, **kwargs):
+    """Upstream session double that stays open until the caller exits."""
+    yield object()
+
+
+@pytest.mark.asyncio
+async def test_full_queue_rejects_immediately_with_proxy_busy():
+    """Cap 1 + queue 1: the third concurrent session fails fast instead of queueing."""
+    transport = BoundedStreamableHttpTransport("http://upstream.test/mcp", max_sessions=1)
+    transport._session_gate.max_waiters = 1
+    release = asyncio.Event()
+
+    async def hold():
+        """Open a session and keep it until released."""
+        async with transport.connect_session():
+            await release.wait()
+
+    with patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        holder = asyncio.ensure_future(hold())
+        waiter = asyncio.ensure_future(hold())
+        await asyncio.sleep(0.01)
+        assert (transport._session_gate.open, transport._session_gate.waiting) == (1, 1)
+        with pytest.raises(compose.ProxyBusyError, match="queue full") as info:
+            async with transport.connect_session():
+                pass
+        assert info.value.timed_out is False
+        release.set()
+        await asyncio.gather(holder, waiter)
+    assert (transport._session_gate.open, transport._session_gate.waiting) == (0, 0)
+    assert transport._breaker.failures == 0  # load shedding is not an upstream fault
+
+
+@pytest.mark.asyncio
+async def test_acquire_timeout_raises_and_restores_counts():
+    """A waiter past the acquire timeout raises ProxyBusyError and leaves no slot or waiter behind."""
+    transport = BoundedStreamableHttpTransport("http://upstream.test/mcp", max_sessions=1)
+    transport._session_gate.timeout_s = 0.02
+    release = asyncio.Event()
+
+    async def hold():
+        """Hold the only slot."""
+        async with transport.connect_session():
+            await release.wait()
+
+    with patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        holder = asyncio.ensure_future(hold())
+        await asyncio.sleep(0.01)
+        with pytest.raises(compose.ProxyBusyError, match="no slot") as info:
+            async with transport.connect_session():
+                pass
+        assert info.value.timed_out is True
+        assert transport._session_gate.waiting == 0
+        release.set()
+        await holder
+        async with transport.connect_session():  # the slot is reusable
+            assert transport._session_gate.open == 1
+    assert transport._session_gate.open == 0
+    assert transport._session_gate._sem._value == 1  # no over-release
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_releases_nothing():
+    """Cancelling a queued waiter neither leaks a waiter count nor over-releases the semaphore."""
+    transport = BoundedStreamableHttpTransport("http://upstream.test/mcp", max_sessions=1)
+    release = asyncio.Event()
+
+    async def hold():
+        """Hold the only slot."""
+        async with transport.connect_session():
+            await release.wait()
+
+    with patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        holder = asyncio.ensure_future(hold())
+        await asyncio.sleep(0.01)
+        waiter = asyncio.ensure_future(hold())
+        await asyncio.sleep(0.01)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        release.set()
+        await holder
+    gate = transport._session_gate
+    assert (gate.open, gate.waiting, gate._sem._value) == (0, 0, 1)
+
+
+@pytest.mark.asyncio
+async def test_global_gate_caps_sessions_across_proxies():
+    """Two proxies with cap 4 each still share one global cap of 3."""
+    registry = SimpleNamespace(server={"graph": {"proxy_max_total_sessions": 3}})
+    live = 0
+    peak = 0
+
+    @contextlib.asynccontextmanager
+    async def fake_connect(self, **kwargs):
+        """Track open upstream sessions across both transports."""
+        nonlocal live, peak
+        live += 1
+        peak = max(peak, live)
+        try:
+            await asyncio.sleep(0.01)
+            yield object()
+        finally:
+            live -= 1
+
+    with patch.object(compose, "_global_gate", None), \
+         patch("utils.config_registry.get_config_registry", return_value=registry), \
+         patch.object(StreamableHttpTransport, "connect_session", fake_connect):
+        a = BoundedStreamableHttpTransport("http://a.test/mcp", max_sessions=4)
+        b = BoundedStreamableHttpTransport("http://b.test/mcp", max_sessions=4)
+
+        async def one(t):
+            """Open and release one session."""
+            async with t.connect_session():
+                await asyncio.sleep(0.01)
+
+        await asyncio.gather(*(one(t) for t in (a, b) for _ in range(6)))
+    assert peak == 3
+
+
+def _failing_connect(counter: dict):
+    """Upstream session double whose connect always raises."""
+    @contextlib.asynccontextmanager
+    async def fail(self, **kwargs):
+        """Simulate an upstream refusing the session."""
+        counter["calls"] += 1
+        raise RuntimeError("401 Unauthorized")
+        yield  # pragma: no cover
+    return fail
+
+
+@pytest.mark.asyncio
+async def test_breaker_opens_and_fails_fast_without_upstream_calls():
+    """After a failed session, calls inside the window raise ProxyBackoffError without connecting."""
+    transport = BoundedStreamableHttpTransport(
+        "http://upstream.test/mcp", backoff=BackoffPolicy(base_s=60.0, max_s=60.0, max_attempts=0)
+    )
+    counter = {"calls": 0}
+    with patch.object(StreamableHttpTransport, "connect_session", _failing_connect(counter)):
+        with pytest.raises(RuntimeError, match="401"):
+            async with transport.connect_session():
+                pass
+        for _ in range(10):
+            with pytest.raises(ProxyBackoffError, match="backing off"):
+                async with transport.connect_session():
+                    pass
+    assert counter["calls"] == 1
+    assert transport._breaker.is_open()
+    assert compose.session_stats()["breakers_open"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_breaker_counts_one_concurrent_burst_once():
+    """Sessions admitted together that fail together count as one failure."""
+    transport = BoundedStreamableHttpTransport(
+        "http://upstream.test/mcp", backoff=BackoffPolicy(base_s=0.0, max_s=0.0, max_attempts=3)
+    )
+
+    @contextlib.asynccontextmanager
+    async def slow_fail(self, **kwargs):
+        """Fail after a beat, so the whole burst is admitted first."""
+        await asyncio.sleep(0.01)
+        raise RuntimeError("502")
+        yield  # pragma: no cover
+
+    async def one():
+        """Open one session."""
+        async with transport.connect_session():
+            pass
+
+    with patch.object(StreamableHttpTransport, "connect_session", slow_fail):
+        results = await asyncio.gather(*(one() for _ in range(8)), return_exceptions=True)
+    assert all(isinstance(r, RuntimeError) for r in results)
+    assert transport._breaker.failures == 1
+
+
+@pytest.mark.asyncio
+async def test_breaker_gives_up_fires_session_hook_once_and_success_resets():
+    """The attempt cap fires the exhausted hook with kind ``session`` exactly once."""
+    handle = build_proxy("breaker", "http", "http://127.0.0.1:9/mcp")
+    inner = next(p for p in handle.server.providers if isinstance(p, CoalescingProxyProvider))
+    transport = inner.client_factory().transport
+    breaker = transport._breaker
+    breaker.backoff = BackoffPolicy(base_s=0.0, max_s=0.0, max_attempts=2)
+    fired = []
+    assert set_exhausted_hook(handle, lambda *a: fired.append(a))
+    counter = {"calls": 0}
+    with patch.object(StreamableHttpTransport, "connect_session", _failing_connect(counter)):
+        for _ in range(2):
+            with pytest.raises(RuntimeError):
+                async with transport.connect_session():
+                    pass
+        for _ in range(3):
+            with pytest.raises(ProxyBackoffError, match="gave up after 2"):
+                async with transport.connect_session():
+                    pass
+    assert counter["calls"] == 2
+    assert fired == [("session", 2, "401 Unauthorized")]
+
+    breaker.success()
+    with patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        async with transport.connect_session():
+            pass
+    assert breaker.failures == 0 and not breaker.is_open()
+
+
+@pytest.mark.asyncio
+async def test_clean_session_after_failure_closes_breaker():
+    """One healthy session resets the consecutive-failure count."""
+    transport = BoundedStreamableHttpTransport(
+        "http://upstream.test/mcp", backoff=BackoffPolicy(base_s=0.0, max_s=0.0, max_attempts=5)
+    )
+    counter = {"calls": 0}
+    with patch.object(StreamableHttpTransport, "connect_session", _failing_connect(counter)):
+        with pytest.raises(RuntimeError):
+            async with transport.connect_session():
+                pass
+    assert transport._breaker.failures == 1
+    with patch.object(StreamableHttpTransport, "connect_session", _held_session):
+        async with transport.connect_session():
+            pass
+    assert transport._breaker.failures == 0
