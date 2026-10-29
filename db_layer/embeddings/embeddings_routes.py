@@ -356,6 +356,7 @@ GOAP_CANDIDATE_DENYLIST: set[tuple[str, str]] = {
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_unbind"),
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_add"),
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_update"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_seek"),
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_remove"),
 }
 

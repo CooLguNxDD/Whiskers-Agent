@@ -29,6 +29,7 @@ RELAYS = [
     ("fleet_relay_unbind", {"actor": "sol", "relay": "main", "binding_id": 7}, "DELETE", "/api/v1/relays/main/bindings/7", "params", {"actor": "sol"}, "admin"),
     ("fleet_relay_route_add", {"actor": "sol", "relay": "main", "external_id": "123", "topics": ["ci.>"], "format": "card"}, "POST", "/api/v1/relays/main/routes", "body", {"actor": "sol", "external_id": "123", "topics": ["ci.>"], "format": "card"}, "admin"),
     ("fleet_relay_route_update", {"actor": "sol", "relay": "main", "route_id": 2, "enabled": False, "topics": []}, "PATCH", "/api/v1/relays/main/routes/2", "body", {"actor": "sol", "enabled": False, "topics": []}, "admin"),
+    ("fleet_relay_route_seek", {"actor": "sol", "relay": "main", "route_id": 2, "after_event_id": 0}, "POST", "/api/v1/relays/main/routes/2/seek", "body", {"actor": "sol", "after_event_id": 0}, "admin"),
     ("fleet_relay_route_remove", {"actor": "sol", "relay": "main", "route_id": 2}, "DELETE", "/api/v1/relays/main/routes/2", "params", {"actor": "sol"}, "admin"),
 ]
 ALL_CASES = CONSUMERS + RELAYS
@@ -70,6 +71,7 @@ async def test_consumer_wait_clamps_and_extends_http_timeout():
     ("fleet_relay_update", {"actor": "sol", "relay": "../consumers", "expected_version": 1}),
     ("fleet_relay_bind", {"actor": "sol", "relay": "main/x", "external_id": "1", "hub_channel": "fleet"}),
     ("fleet_relay_route_remove", {"actor": "sol", "relay": "main?x=1", "route_id": 1}),
+    ("fleet_relay_route_seek", {"actor": "sol", "relay": "../x", "route_id": 1, "after_event_id": 0}),
 ])
 async def test_bad_path_segments_fail_fast(name, args):
     with patch(f"{_TOOLS}.request_json", new_callable=AsyncMock) as hub:

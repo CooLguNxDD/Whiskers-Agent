@@ -63,6 +63,7 @@
     "fleet_relay_unbind",
     "fleet_relay_route_add",
     "fleet_relay_route_update",
+    "fleet_relay_route_seek",
     "fleet_relay_route_remove"
   ],
   "scopes": [

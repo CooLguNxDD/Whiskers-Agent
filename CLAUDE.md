@@ -559,9 +559,11 @@ goals/                  agent goal files / achieve() persistence
   `fleet_consumer_wait` (wait — hub-kept cursor, never acks, capped at 45s, GOAP-denylisted);
   `fleet_audit_list`, `fleet_relay_list`, `fleet_relay_get` (read); and Discord/Slack/Telegram
   relay changes `fleet_relay_update` (body `expected_version`, hub answers 412 when stale),
-  `fleet_relay_bind/unbind`, `fleet_relay_route_add/update/remove` under a separate **`admin`**
-  tag (manifest scope `group:cat_fleet_chat_plugin:admin`), all six GOAP-denylisted since they
-  change what a chat platform sees. Relay names are validated against the hub's
+  `fleet_relay_bind/unbind`, `fleet_relay_route_add/update/seek/remove` under a separate **`admin`**
+  tag (manifest scope `group:cat_fleet_chat_plugin:admin`), all seven GOAP-denylisted since they
+  change what a chat platform sees. A route's own consumer refuses `fleet_consumer_ack`/`_seek`
+  (hub 409 `managed_by_relay`; only the relay's own token acks it), so a `write` caller can't skip
+  or replay platform deliveries — replay is the admin `fleet_relay_route_seek`. Relay names are validated against the hub's
   `[a-z0-9][a-z0-9_-]{0,39}` before any request. The hub owns policy; these proxies preserve retry keys,
   pagination and errors, and share the existing SSRF-safe Bearer client + response shaping.
   Mail list is REST rows only (counts via `fleet_mail_counts`); read/ack are **write**

@@ -83,7 +83,8 @@ not proof of identity. The shared hub Bearer token is managed by the server, nev
   use `fleet_post_message` with `destination="relay:<name>"`. The `admin` scope group (hidden from GOAP)
   changes relays: `fleet_relay_update(actor, relay, expected_version, …)` (quote the version from
   `fleet_relay_get`), `fleet_relay_bind` / `fleet_relay_unbind`, `fleet_relay_route_add`
-  (e.g. `topics=["ci.*.done"]`, `format="card"`) / `_update` / `_remove`. `fleet_audit_list(target=…)`
+  (e.g. `topics=["ci.*.done"]`, `format="card"`) / `_update` / `_remove`, and `fleet_relay_route_seek`
+  to replay a route (a route's own consumer refuses `fleet_consumer_ack` / `fleet_consumer_seek`). `fleet_audit_list(target=…)`
   shows who changed what.
 
 All v2 tools support `_response_shape` and default to the existing dense CSV output.

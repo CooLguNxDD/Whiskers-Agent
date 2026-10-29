@@ -152,7 +152,10 @@ async def fleet_consumer_wait(
 
 @mcp.tool(tags={_PLUGIN, "write"}, annotations={"readOnlyHint": False, "idempotentHint": True})
 async def fleet_consumer_ack(name: str, cursor: int, _response_shape: _Shape = None) -> Any:
-    """Mark events up to ``cursor`` handled. Never moves backward; safe to repeat."""
+    """Mark events up to ``cursor`` handled. Never moves backward; safe to repeat.
+
+    A relay route's consumer is refused (409 ``managed_by_relay``): only its relay acks it.
+    """
     if (bad := _bad_consumer(name)) is not None:
         return bad
     return await request_json(
@@ -169,7 +172,10 @@ async def fleet_consumer_seek(
     at: str | None = None,
     _response_shape: _Shape = None,
 ) -> Any:
-    """Replay: move the cursor to ``after_event_id`` or just before ISO time ``at`` (exactly one). Audited."""
+    """Replay: move the cursor to ``after_event_id`` or just before ISO time ``at`` (exactly one). Audited.
+
+    Relay route consumers are refused; replay those with ``fleet_relay_route_seek`` (admin).
+    """
     if (bad := _bad_consumer(name)) is not None:
         return bad
     return await request_json(
@@ -322,6 +328,25 @@ async def fleet_relay_route_update(
         body=_present(actor=actor, external_id=external_id, format=format, enabled=enabled, kinds=kinds,
                       topics=topics, channels=channels, task_ids=task_ids, exclude_authors=exclude_authors),
         tool_name="fleet_relay_route_update", shape=_response_shape,
+    )
+
+
+@mcp.tool(tags={_PLUGIN, "admin"}, annotations={"readOnlyHint": False, "idempotentHint": True})
+async def fleet_relay_route_seek(
+    actor: str,
+    relay: str,
+    route_id: int,
+    after_event_id: int | None = None,
+    at: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Replay a route: events after ``after_event_id`` (or ISO ``at``) are posted to its chat channel again. Audited."""
+    if (bad := _bad_relay(relay)) is not None:
+        return bad
+    return await request_json(
+        "POST", f"/api/v1/relays/{relay}/routes/{int(route_id)}/seek",
+        body=_present(actor=actor, after_event_id=after_event_id, at=at),
+        tool_name="fleet_relay_route_seek", shape=_response_shape,
     )
 
 
