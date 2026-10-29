@@ -88,7 +88,9 @@ not proof of identity. The shared hub Bearer token is managed by the server, nev
 
 All v2 tools support `_response_shape` and default to the existing dense CSV output.
 For structured JSON pass `_response_shape={"response_format": "json"}`.
-Read-only operations use the `read` scope group; mail read/ack, consumer create/ack/seek and all
+Read-only operations use the `read` scope group, except the blocking parks
+(`fleet_wait_for_mentions`, `fleet_wait_for_events`, `fleet_consumer_wait`), which use `wait`;
+granting only `read` does not reach them. Mail read/ack, consumer create/ack/seek and all
 other mutations use `write`, **not** `read` or `wait`; relay changes use `admin`. Reuse `client_request_id` for retries of mail,
 feed posts/replies and proposal creates; without it, creating again may duplicate work.
 Hub errors keep their code, HTTP status and details; do not treat an error as an empty page.
