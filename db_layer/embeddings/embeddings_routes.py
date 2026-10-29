@@ -349,6 +349,14 @@ GOAP_CANDIDATE_DENYLIST: set[tuple[str, str]] = {
     # A blocking mention or event wait must not become a GOAP plan step.
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_wait_for_mentions"),
     ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_wait_for_events"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_consumer_wait"),
+    # Relay admin writes change what a Discord/Slack/Telegram channel sees.
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_update"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_bind"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_unbind"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_add"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_update"),
+    ("cat_fleet_chat_plugin", "cat_fleet_chat_plugin__fleet_relay_route_remove"),
 }
 
 
