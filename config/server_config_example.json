@@ -82,6 +82,7 @@
     "proxy_auto_reconnect_interval_s": 300,
     "proxy_auto_reconnect_max_s": 3600,
     "proxy_auto_reconnect_max_attempts": 0,
+    "proxy_get_405_memo_s": 3600,
     "direct_call_shaping": true,
     "direct_call_shaping_exclude": [],
     "max_skill_total_chars": 10000,

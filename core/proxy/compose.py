@@ -137,6 +137,74 @@ ExhaustedHook = Callable[[str, int, str], None]
 
 _shared_ssl_ctx: ssl.SSLContext | None = None
 
+_DEFAULT_GET_405_MEMO_S = 3600.0
+# url -> monotonic expiry: upstreams that answered the SSE GET stream with 405 (stateless servers
+# such as Notion / GitHub Copilot MCP). The SDK treats 405 as "no stream" and still re-probes on
+# every session; the memo answers those probes locally instead of hitting upstream again.
+_get_405_memo: dict[str, float] = {}
+
+
+def _is_sse_get(request: Any) -> bool:
+    """True for the SDK's standalone server-to-client stream probe (GET + text/event-stream)."""
+    return request.method == "GET" and "text/event-stream" in request.headers.get("accept", "")
+
+
+def _remember_get_405(url: str) -> None:
+    """Memoize a 405 on ``url``'s SSE GET for ``graph.proxy_get_405_memo_s`` (0 disables)."""
+    ttl = _config_number(_graph_config(), "proxy_get_405_memo_s", _DEFAULT_GET_405_MEMO_S, float, 0.0)
+    if ttl <= 0:
+        return
+    now = time.monotonic()
+    for stale in [u for u, exp in _get_405_memo.items() if exp <= now]:
+        del _get_405_memo[stale]
+    if url not in _get_405_memo:
+        logger.info("Proxy upstream %s does not serve the SSE GET stream (405); skipping it for %.0fs", url, ttl)
+    _get_405_memo[url] = now + ttl
+
+
+def _get_405_memoized(url: str) -> bool:
+    """True while ``url``'s SSE GET is known to 405."""
+    exp = _get_405_memo.get(url)
+    if exp is None:
+        return False
+    if exp <= time.monotonic():
+        _get_405_memo.pop(url, None)
+        return False
+    return True
+
+
+_get405_client_cls: type | None = None
+
+
+def _get_get405_client_cls() -> type:
+    """Build (once) the ``httpx2.AsyncClient`` subclass that short-circuits memoized SSE GET 405s.
+
+    Overrides ``send`` rather than passing a custom ``transport=``: env-proxy mounts
+    (``HTTPS_PROXY``) take precedence over ``transport`` and would bypass a wrapper.
+    """
+    global _get405_client_cls
+    if _get405_client_cls is not None:
+        return _get405_client_cls
+    import httpx2
+
+    class _Get405MemoClient(httpx2.AsyncClient):
+        """AsyncClient that answers a known-405 SSE GET locally and records new ones."""
+
+        async def send(self, request, **kwargs):  # type: ignore[override]
+            """Send ``request``; a memoized SSE GET 405 never reaches the network."""
+            if not _is_sse_get(request):
+                return await super().send(request, **kwargs)
+            url = str(request.url)
+            if _get_405_memoized(url):
+                return httpx2.Response(405, request=request)
+            response = await super().send(request, **kwargs)
+            if response.status_code == 405:
+                _remember_get_405(url)
+            return response
+
+    _get405_client_cls = _Get405MemoClient
+    return _get405_client_cls
+
 
 def _shared_http_client_factory(
     headers: dict[str, str] | None = None,
@@ -154,7 +222,7 @@ def _shared_http_client_factory(
         _shared_ssl_ctx = httpx2.create_ssl_context()
     if timeout is None:
         timeout = httpx2.Timeout(30.0, read=300.0)
-    return httpx2.AsyncClient(
+    return _get_get405_client_cls()(
         headers=headers,
         timeout=timeout,
         auth=auth,

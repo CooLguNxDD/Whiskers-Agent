@@ -570,3 +570,68 @@ async def test_clean_session_after_failure_closes_breaker():
         async with transport.connect_session():
             pass
     assert transport._breaker.failures == 0
+
+
+# --- SSE GET 405 memo ---------------------------------------------------------------------
+
+
+def _counting_upstream(status: int, calls: list):
+    """httpx2 mock transport answering every request with ``status`` and recording it."""
+    import httpx2
+
+    def handler(request):
+        """Record the request and answer with the fixed status."""
+        calls.append((request.method, str(request.url)))
+        return httpx2.Response(status)
+
+    return httpx2.MockTransport(handler)
+
+
+@pytest.mark.asyncio
+async def test_sse_get_405_is_memoized_and_posts_still_go_upstream():
+    """The first SSE GET 405 goes upstream; later ones are answered locally; POSTs are untouched."""
+    calls: list = []
+    url = "https://stateless.test/mcp"
+    with patch.object(compose, "_get_405_memo", {}):
+        client = compose._get_get405_client_cls()(transport=_counting_upstream(405, calls))
+        sse = {"Accept": "text/event-stream"}
+        async with client:
+            for _ in range(5):
+                assert (await client.get(url, headers=sse)).status_code == 405
+            await client.post(url, headers={"Accept": "application/json, text/event-stream"})
+            await client.get(url)  # a plain GET is not the stream probe
+    assert calls == [("GET", url), ("POST", url), ("GET", url)]
+
+
+@pytest.mark.asyncio
+async def test_sse_get_405_memo_expires_and_can_be_disabled():
+    """An expired memo re-probes upstream; ``proxy_get_405_memo_s: 0`` never memoizes."""
+    calls: list = []
+    url = "https://stateless.test/mcp"
+    sse = {"Accept": "text/event-stream"}
+    with patch.object(compose, "_get_405_memo", {}) as memo:
+        client = compose._get_get405_client_cls()(transport=_counting_upstream(405, calls))
+        async with client:
+            await client.get(url, headers=sse)
+            memo[url] = 0.0  # expired
+            await client.get(url, headers=sse)
+        assert len(calls) == 2
+
+    registry = SimpleNamespace(server={"graph": {"proxy_get_405_memo_s": 0}})
+    calls.clear()
+    with patch.object(compose, "_get_405_memo", {}), \
+         patch("utils.config_registry.get_config_registry", return_value=registry):
+        client = compose._get_get405_client_cls()(transport=_counting_upstream(405, calls))
+        async with client:
+            for _ in range(3):
+                await client.get(url, headers=sse)
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_shared_factory_builds_the_memo_client():
+    """Upstream transports get the memoizing client from the shared factory."""
+    with patch.object(compose, "_shared_ssl_ctx", None):
+        client = compose._shared_http_client_factory()
+    async with client:
+        assert isinstance(client, compose._get_get405_client_cls())
