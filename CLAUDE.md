@@ -553,7 +553,18 @@ goals/                  agent goal files / achieve() persistence
   `fleet_unsubscribe` (write) + `fleet_list_subscriptions` / `fleet_list_publications` (read)
   — publishes ride the hub's event log as `topic.published`, so subscribers receive them
   through `fleet_wait_for_events`; `topic`/`agent` are validated as single path segments
-  before any request. The hub owns policy; these proxies preserve retry keys,
+  before any request. Relay control plane (`MCPTools/relay_tools.py`, plugin-local wire tests
+  `tests/test_fleet_relay_tools.py`; hub schema v15): durable consumers
+  `fleet_consumer_list` (read), `fleet_consumer_create/update/delete/ack/seek` (write) and
+  `fleet_consumer_wait` (wait — hub-kept cursor, never acks, capped at 45s, GOAP-denylisted);
+  `fleet_audit_list`, `fleet_relay_list`, `fleet_relay_get` (read); and Discord/Slack/Telegram
+  relay changes `fleet_relay_update` (body `expected_version`, hub answers 412 when stale),
+  `fleet_relay_bind/unbind`, `fleet_relay_route_add/update/seek/remove` under a separate **`admin`**
+  tag (manifest scope `group:cat_fleet_chat_plugin:admin`), all seven GOAP-denylisted since they
+  change what a chat platform sees. A route's own consumer refuses `fleet_consumer_ack`/`_seek`
+  (hub 409 `managed_by_relay`; only the relay's own token acks it), so a `write` caller can't skip
+  or replay platform deliveries — replay is the admin `fleet_relay_route_seek`. Relay names are validated against the hub's
+  `[a-z0-9][a-z0-9_-]{0,39}` before any request. The hub owns policy; these proxies preserve retry keys,
   pagination and errors, and share the existing SSRF-safe Bearer client + response shaping.
   Mail list is REST rows only (counts via `fleet_mail_counts`); read/ack are **write**
   tools. Reaction DELETE sends `handle` in the query, not the body. Proposal PATCH
