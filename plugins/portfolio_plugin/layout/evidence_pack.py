@@ -386,9 +386,9 @@ async def _optional_web_snippets(
     # Dispatched through the catalog rather than imported: search_plugin may be
     # boot-excluded, and a cross-plugin import would reintroduce the coupling.
     try:
-        from core.route_registry.execute import execute_operation
+        from core.route_registry.execute import execute_plugin_tool
 
-        res = await execute_operation(
+        res = await execute_plugin_tool(
             "search_plugin",
             "web_search",
             {

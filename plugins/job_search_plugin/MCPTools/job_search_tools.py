@@ -695,10 +695,10 @@ async def _fetch_generic_web_posting(url: str) -> dict:
     direct import — SSRF safety is inherited from that tool's own
     _safe_async_client usage (CLAUDE.md §1: no plugin→plugin imports).
     """
-    from core.route_registry.execute import execute_operation
+    from core.route_registry.execute import execute_plugin_tool
 
     try:
-        result = await execute_operation(
+        result = await execute_plugin_tool(
             "search_plugin",
             "fetch_url",
             {"url": url},

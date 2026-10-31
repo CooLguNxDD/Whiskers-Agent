@@ -141,6 +141,30 @@ async def _maybe_shape_result(
         return result
 
 
+async def execute_plugin_tool(
+    plugin_id: str,
+    tool_name: str,
+    args: dict,
+    *,
+    caller_scopes: list[str] | None,
+) -> Any:
+    """Dispatch a plugin's MCP tool by its bare name.
+
+    Catalog operation ids are plugin-qualified (``search_plugin__fetch_url``), so
+    a bare ``fetch_url`` is "Unknown operation". Tries the qualified id first and
+    falls back to the bare one only on ``not_found``, for catalogs that register
+    the bare name.
+    """
+    prefix = f"{plugin_id}__"
+    qualified = tool_name if tool_name.startswith(prefix) else prefix + tool_name
+    try:
+        return await execute_operation(plugin_id, qualified, args, caller_scopes=caller_scopes)
+    except ExecuteError as exc:
+        if exc.code != "not_found" or qualified == tool_name:
+            raise
+    return await execute_operation(plugin_id, tool_name, args, caller_scopes=caller_scopes)
+
+
 async def execute_operation(
     plugin_id: str,
     operation_id: str,

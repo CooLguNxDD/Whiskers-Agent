@@ -21,6 +21,7 @@ from typing import Any
 from core.context import mcp, current_tenant_id
 from plugins.portfolio_plugin.store import (
     create_job_layout,
+    find_reusable_job_layout,
     get_job_layout_by_short_id,
     update_job_layout,
 )
@@ -73,6 +74,14 @@ def _safe_float(value: Any, default: float) -> float:
         return default
 
 
+def _bake_status(degraded: bool, quality: Any, ctx: BakeContext) -> tuple[str, str]:
+    """Collapse a persisted bake into ``(ok|degraded, reason)`` for callers."""
+    if not degraded:
+        return "ok", ""
+    reasons = list(quality.codes() or []) + list(ctx.codes())
+    return "degraded", ",".join(dict.fromkeys(reasons)) or "degraded_compose_path"
+
+
 @mcp.tool(
     title="bake_portfolio_for_job",
     tags={"portfolio_plugin", "write"},
@@ -89,6 +98,7 @@ async def bake_portfolio_for_job(
     use_fragments: bool = True,
     layout: dict | None = None,
     display_copy_by_slug: dict | None = None,
+    force: bool = False,
 ) -> dict:
     """Compose and persist a job-tailored portfolio layout; returns its short id.
 
@@ -98,8 +108,14 @@ async def bake_portfolio_for_job(
     without re-thinning. ``portfolio_layout.mode=fast`` uses the **floor
     composer** (not thin scoped compose).
 
-    A fresh short id is minted per call (no idempotency dedupe — re-running
-    for the same job just leaves an orphaned, harmless extra row).
+    When ``job_application_job_id`` is given and the tenant already has a
+    non-degraded bake for it, that layout is returned (``reused: true``) instead
+    of minting a new short id, so links already sent keep working. Pass
+    ``force=True`` to re-bake on purpose; a prebuilt ``layout`` always persists.
+    Without a job id every call mints a fresh short id.
+
+    Every result carries ``bake_status`` (``ok`` | ``degraded`` | ``failed``) and
+    ``bake_status_reason`` so callers need not infer failure from a missing id.
 
     Tenant is always taken from the authenticated principal
     (``current_tenant_id``) — never from a caller-supplied argument — so a
@@ -121,6 +137,7 @@ async def bake_portfolio_for_job(
         theme: Optional layout theme id (cozy|neon|paper|latte|frappe|macchiato|mocha).
         use_fragments: Ignored (kept for wire back-compat; fragments removed).
         layout: Optional prebuilt layout dict (specialist draft) to persist as-is.
+        force: Re-bake even if a reusable layout exists for ``job_application_job_id``.
         display_copy_by_slug: Optional precomputed dual-granularity blobs from
             ``author_project_display_copy`` (FlowSpec stage).
     """
@@ -128,12 +145,16 @@ async def bake_portfolio_for_job(
         return {
             "status": "error",
             "error": "missing_required_fields",
+            "bake_status": "failed",
+            "bake_status_reason": "missing_required_fields",
             "missing_fields": ["company"],
         }
     if not role or not str(role).strip():
         return {
             "status": "error",
             "error": "missing_required_fields",
+            "bake_status": "failed",
+            "bake_status_reason": "missing_required_fields",
             "missing_fields": ["role"],
         }
 
@@ -147,11 +168,47 @@ async def bake_portfolio_for_job(
         return {
             "status": "error",
             "error": "missing_tenant_context",
+            "bake_status": "failed",
+            "bake_status_reason": "missing_tenant_context",
             "message": "Authenticated tenant context is required to bake a portfolio layout.",
         }
 
     ctx = BakeContext(company=str(company), role=str(role), tenant_id=tid)
     run_id = new_run_id()
+
+    if not force and not isinstance(layout, dict) and (job_application_job_id or "").strip():
+        try:
+            existing = await find_reusable_job_layout(job_application_job_id.strip(), tid)
+        except Exception as exc:
+            logger.warning("bake: reuse lookup fail-open: %s", exc)
+            existing = None
+        if existing:
+            await record_bake_run(
+                ctx,
+                run_id=run_id,
+                status="ok",
+                short_id=existing["short_id"],
+                compose_path=existing.get("compose_path"),
+                mode=existing.get("mode"),
+                degraded=False,
+            )
+            return {
+                "status": "ok",
+                "short_id": existing["short_id"],
+                "portfolio_job_id": existing["short_id"],
+                "query_param": f"j={existing['short_id']}",
+                "audience": existing.get("audience"),
+                "star_query": existing.get("star_query"),
+                "plugin": "portfolio_plugin",
+                "run_id": run_id,
+                "degraded": False,
+                "bake_status": "ok",
+                "bake_status_reason": "reused_existing_layout",
+                "reused": True,
+                "compose_path": existing.get("compose_path"),
+                "errors": [],
+                "layout": existing.get("layout_json"),
+            }
 
     resolved = await resolve_job_posting_text(
         job_description or "",
@@ -166,6 +223,8 @@ async def bake_portfolio_for_job(
         return {
             "status": "error",
             "error": "missing_required_fields",
+            "bake_status": "failed",
+            "bake_status_reason": "missing_required_fields",
             "missing_fields": ["job_description"],
             "message": "Provide a job_description and/or posting_url/provider detail.",
             "run_id": run_id,
@@ -194,6 +253,8 @@ async def bake_portfolio_for_job(
         return {
             "status": "error",
             "error": "layout_compose_failed",
+            "bake_status": "failed",
+            "bake_status_reason": "layout_compose_failed",
             "run_id": run_id,
             "errors": errors,
             "timings_ms": ctx.timings(),
@@ -374,6 +435,8 @@ async def bake_portfolio_for_job(
             return {
                 "status": "error",
                 "error": "quality_gate_failed",
+                "bake_status": "failed",
+                "bake_status_reason": "quality_gate_failed",
                 "run_id": run_id,
                 "quality": quality.to_dict(),
                 "compose_path": compose_path or None,
@@ -396,6 +459,8 @@ async def bake_portfolio_for_job(
         return {
             "status": "error",
             "error": "short_id_collision",
+            "bake_status": "failed",
+            "bake_status_reason": "short_id_collision",
             "run_id": run_id,
             "errors": ctx.error_dicts(),
             "timings_ms": ctx.timings(),
@@ -432,6 +497,8 @@ async def bake_portfolio_for_job(
         job_brief_hash=(_bake_meta or {}).get("jobBriefHash"),
     )
 
+    bake_status, bake_status_reason = _bake_status(degraded, quality, ctx)
+
     logger.info(
         "bake: ok short_id=%s path=%s mode=%s degraded=%s total_ms=%s codes=%s",
         short_id,
@@ -459,6 +526,9 @@ async def bake_portfolio_for_job(
         # A bake can succeed having degraded through several rungs — surface the
         # causes on success too, or "ok" hides every fallback that got us here.
         "degraded": degraded,
+        "bake_status": bake_status,
+        "bake_status_reason": bake_status_reason,
+        "reused": False,
         "compose_path": compose_path or None,
         "quality": quality.to_dict(),
         "errors": ctx.error_dicts(),

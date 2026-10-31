@@ -264,6 +264,27 @@ async def test_prepare_application_record_always_drafted():
 
 
 @pytest.mark.asyncio
+async def test_prepare_application_record_flags_failed_bake():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(portfolio_job_id="", company="Acme", role="SRE")
+    assert res["bake_status"] == "failed"
+    assert res["portfolio_url"] == ""
+    assert "portfolio_bake=failed" in res["notes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_application_record_passes_through_degraded_status():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(
+        portfolio_job_id="abc123", bake_status="degraded", bake_status_reason="ungrounded_block"
+    )
+    assert res["bake_status"] == "degraded"
+    assert "portfolio_bake=degraded (ungrounded_block)" in res["notes"]
+
+
+@pytest.mark.asyncio
 async def test_prepare_application_record_omits_localhost_portfolio_url():
     from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
 

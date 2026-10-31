@@ -174,7 +174,10 @@
         "portfolio_job_id",
         "query_param",
         "quality",
-        "degraded"
+        "degraded",
+        "bake_status",
+        "bake_status_reason",
+        "reused"
       ],
       "required_outputs": [],
       "on_fail": "continue"
@@ -185,6 +188,8 @@
       "op": "job_search_plugin/job_search_plugin__prepare_application_record",
       "reads": [
         "portfolio_job_id",
+        "bake_status",
+        "bake_status_reason",
         "job_id",
         "company",
         "role",
@@ -197,6 +202,8 @@
         "portfolio_url",
         "job_id",
         "application_status",
+        "bake_status",
+        "bake_status_reason",
         "notes"
       ],
       "required_outputs": [
