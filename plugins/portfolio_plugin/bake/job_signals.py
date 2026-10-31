@@ -29,9 +29,9 @@ async def _call_plugin_op(plugin_id: str, operation_id: str, args: dict[str, Any
     ``caller_scopes=None`` marks a trusted local caller, matching the existing
     discovery dispatch.
     """
-    from core.route_registry.execute import execute_operation
+    from core.route_registry.execute import execute_plugin_tool
 
-    return await execute_operation(
+    return await execute_plugin_tool(
         plugin_id,
         operation_id,
         {**args, "_response_shape": {"response_format": "json"}},

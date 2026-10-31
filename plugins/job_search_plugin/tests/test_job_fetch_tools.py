@@ -262,7 +262,7 @@ async def test_fetch_job_posting_generic_web_fallback_dispatches_via_execute_ope
     assert res["clean_description"] == "Some job posting text extracted from the page."
     mock_exec.assert_awaited_once_with(
         "search_plugin",
-        "fetch_url",
+        "search_plugin__fetch_url",
         {"url": "https://example.com/careers/123"},
         caller_scopes=None,
     )

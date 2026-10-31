@@ -27,7 +27,7 @@ The core server is domain-agnostic; domain integrations live in `plugins/`.
 | **Catalog identity** | Live ops resolve by `(plugin_id, operation_id)` only. `route_embeddings` is a *search index*, not the live catalog. Never trust FE-only schema validation on execute. See skill `inference-guide`. |
 | **Typed events** | EventBus payloads use Pydantic models, not untyped dicts. |
 | **Plugin ownership** | Plugin-owned models/stores/migrations/tests live under `plugins/<pkg>/`, never in core `db_layer/` or top-level `test/`. |
-| **No plugin→plugin imports** | A plugin never imports a sibling. Dispatch by identity through `core.route_registry.execute.execute_operation(plugin_id, operation_id, args, caller_scopes=...)` (reference: `portfolio_plugin/discovery/sources.py::invoke_proxy`); if the target is a plain store function, expose it as a catalog op first. Share plain values via the service locator (`PluginContext.register_service` / `get_service`, backed by `PluginRegistry`) and declare the dependency in the manifest's `"requires"` so the loader's toposort can order it. |
+| **No plugin→plugin imports** | A plugin never imports a sibling. Dispatch by identity through `core.route_registry.execute.execute_operation(plugin_id, operation_id, args, caller_scopes=...)` (op ids are plugin-qualified, `<plugin>__<tool>`; for a bare MCP tool name use `execute_plugin_tool`) (reference: `portfolio_plugin/discovery/sources.py::invoke_proxy`); if the target is a plain store function, expose it as a catalog op first. Share plain values via the service locator (`PluginContext.register_service` / `get_service`, backed by `PluginRegistry`) and declare the dependency in the manifest's `"requires"` so the loader's toposort can order it. |
 | **No plugin→core-internal imports** | A plugin never imports `core.artifact_store.minio_client`, `db_layer.artifact_link_store`, `db_layer.api_key_store`, `core.api_key_management.*`, or reaches `oauth_provider._svc`/`OAuthService._mint_jwt`. Storage goes through `ctx.artifact_store` / `core.artifact_store.get_artifact_store()` (`IArtifactStore`, `core/interfaces/artifact_store.py`); inbound auth (bearer/session-cookie → principal, scoped-token minting) goes through `ctx.auth_service` / `core.auth_service.get_auth_service()` (`IAuthService`, `core/interfaces/auth_service.py`). Most call sites (route handlers, `@mcp.tool()` functions, pre-accept WS handshakes) never receive a `PluginContext`, so the module-level `get_artifact_store()`/`get_auth_service()` singletons are the primary entrypoint, not the `ctx.*` properties. `test/unit/test_plugin_core_import_boundary.py` fails CI on any bypass (module-level or function-local). |
 
 ---
@@ -335,6 +335,15 @@ goals/                  agent goal files / achieve() persistence
   single quality bar) and `run_context.py` hold the pipeline; `MCPTools/bake_admin_tools.py` holds
   the operator-only `list_bake_runs`. Tests patch each helper **where it now lives**, not on
   `bake_tools`.
+  Bake reuse + status: `bake_portfolio_for_job` returns the newest non-degraded, non-derived layout for the same
+  `(tenant, job_application_job_id)` (`store.find_reusable_job_layout`, `reused: true`) instead of minting a new
+  `?j=`; `force=True` re-bakes, a prebuilt `layout` always persists, and no job id means a fresh bake. Every result
+  (success and error) carries `bake_status` (`ok|degraded|failed`) + `bake_status_reason`; `career_ops_apply_v1`
+  threads it through `prepare_application_record` into the application `notes` (`portfolio_bake=…`) and the
+  curated pipeline result, and infers `failed` when the bake stage wrote nothing. Catalog op ids are
+  plugin-qualified (`search_plugin__fetch_url`): dispatch a sibling's MCP tool by bare name with
+  `core.route_registry.execute.execute_plugin_tool` (qualified first, bare fallback on `not_found`) — the bare
+  `execute_operation("search_plugin", "fetch_url")` was "Unknown operation" and silently degraded every bake.
   Bake observability (`bake/run_context.py` — run-context accumulation, deliberately named apart
   from the quality `bake/contract.py`): `BakeContext` accumulates per-stage errors + timings across the
   fail-open compose ladder, so `errors[]` carries a real cause instead of a placeholder; every

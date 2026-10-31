@@ -112,13 +112,13 @@ def test_claims_do_not_steal_portfolio_turns():
     assert spec.claims.matches(goal="apply to this job posting", goal_class=None)
 
 
-def test_bake_stage_never_reads_job_application_job_id_or_provider():
-    """Cycle guard: bake must never be handed the fields that route it back into
-    job_search_plugin.get_job_details (see enrich_tools._auto_bake_portfolio).
+def test_bake_stage_never_reads_provider():
+    """Cycle guard: bake must never be handed ``provider``. get_job_details is only
+    dispatched when job_application_job_id AND provider are both set
+    (bake/job_signals.py), so the id alone (needed for layout reuse) is safe.
     """
     spec = _load_spec()
     bake = next(s for s in spec.stages if s.id == "bake")
-    assert "job_application_job_id" not in bake.reads
     assert "provider" not in bake.reads
 
 
@@ -261,6 +261,27 @@ async def test_prepare_application_record_always_drafted():
     assert res["application_status"] == "drafted"
     assert res["portfolio_url"] == "https://portfolio.cat.io/?j=abc123"
     assert "fit_score=0.8" in res["notes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_application_record_flags_failed_bake():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(portfolio_job_id="", company="Acme", role="SRE")
+    assert res["bake_status"] == "failed"
+    assert res["portfolio_url"] == ""
+    assert "portfolio_bake=failed" in res["notes"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_application_record_passes_through_degraded_status():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(
+        portfolio_job_id="abc123", bake_status="degraded", bake_status_reason="ungrounded_block"
+    )
+    assert res["bake_status"] == "degraded"
+    assert "portfolio_bake=degraded (ungrounded_block)" in res["notes"]
 
 
 @pytest.mark.asyncio
@@ -511,3 +532,23 @@ async def test_tailor_cover_letter_returns_cover_letter_text_alias():
 
     assert res["tailored_text"] == "Dear Hiring Manager, ..."
     assert res["cover_letter_text"] == "Dear Hiring Manager, ..."
+
+
+@pytest.mark.asyncio
+async def test_prepare_application_record_ok_status_without_link_is_failed():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(portfolio_job_id="", bake_status="OK")
+    assert res["bake_status"] == "failed"
+
+
+def test_bake_stage_reads_job_application_job_id():
+    import json
+    from pathlib import Path
+
+    spec = json.loads(
+        (Path(__file__).parent.parent / "flow_specs" / "career_ops_apply_v1.json").read_text()
+    )
+    stages = {s["id"]: s for s in spec["stages"]}
+    assert "job_application_job_id" in stages["bake"]["reads"]
+    assert "job_application_job_id" in stages["signals"]["writes"]
