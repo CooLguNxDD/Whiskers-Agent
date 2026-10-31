@@ -33,6 +33,8 @@ _CHANNEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 # only fails fast before a round trip.
 CHANNEL_STATES = ("active", "paused", "blocked", "review", "done", "archived")
 _AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# Hub pub/sub topic: dotted lowercase segments, no wildcards (it is a path segment).
+_TOPIC_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}(\.[a-z0-9][a-z0-9_-]{0,63}){0,7}$")
 _PROPOSAL_ID_RE = re.compile(r"^[Pp]?[0-9]+$")
 REACTION_KINDS = ("+1", "-1", "heart", "laugh", "eyes", "tada", "rocket", "thinking")
 
@@ -178,11 +180,12 @@ async def fleet_wait_for_events(
     """Park until an event relevant to ``agent_name`` lands after ``after_event_id``.
 
     Relevant: a message mentioning you (not your own), a task assigned to
-    you that someone else changed, or any channel created, archived,
-    unarchived, or changed state. Omit ``agent_name`` for every event.
-    ``kinds`` narrows to ``message.created``, ``task.updated``,
-    ``channel.created``, ``channel.archived``, ``channel.unarchived``,
-    ``channel.state_changed``. Always send back the
+    you that someone else changed, a publish to a topic you subscribed to
+    (``fleet_subscribe``), or any channel created, archived, unarchived, or
+    changed state. Omit ``agent_name`` for every event.
+    ``kinds`` narrows to e.g. ``message.created``, ``task.updated``,
+    ``topic.published``, ``channel.created``, ``channel.archived``,
+    ``channel.unarchived``, ``channel.state_changed``. Always send back the
     returned ``cursor``, even after ``timed_out``: it skips events that did
     not match. Not for GOAP plans; same timeout rules as
     ``fleet_wait_for_mentions`` (``timeout_seconds`` 1..300, HTTP +10s).
@@ -683,6 +686,98 @@ async def fleet_mail_counts(agent: str, _response_shape: _Shape = None) -> Any:
     """Read a handle's mailbox counts without listing mail."""
     return await _mail_request(
         "GET", agent, "/counts", tool_name="fleet_mail_counts", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": False},
+)
+async def fleet_publish(
+    publisher: str,
+    topic: str,
+    data: Any = None,
+    client_request_id: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Publish JSON ``data`` to a dotted topic (``ci.whiskers.done``); wakes matching subscribers.
+
+    Result lists ``subscribers``. Reuse client_request_id on retries.
+    """
+    if not _TOPIC_RE.fullmatch(topic):
+        return _tool_error("validation_error", "topic must be dotted [a-z0-9][a-z0-9_-]{0,63} segments")
+    return await request_json(
+        "POST", f"/api/v1/topics/{topic}/publish",
+        body=_present(publisher=publisher, data=data, client_request_id=client_request_id),
+        tool_name="fleet_publish", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_subscribe(agent: str, pattern: str, _response_shape: _Shape = None) -> Any:
+    """Subscribe to a topic pattern (``*`` = one segment, trailing ``>`` = the rest). Safe to repeat.
+
+    Matching publishes then arrive as ``topic.published`` in ``fleet_wait_for_events``.
+    """
+    if not _AGENT_RE.fullmatch(agent):
+        return _tool_error("validation_error", "agent must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+    return await request_json(
+        "POST", f"/api/v1/subscriptions/{agent}", body={"pattern": pattern},
+        tool_name="fleet_subscribe", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "write"},
+    annotations={"readOnlyHint": False, "idempotentHint": True},
+)
+async def fleet_unsubscribe(agent: str, pattern: str, _response_shape: _Shape = None) -> Any:
+    """Drop one exact subscription pattern. Safe to repeat."""
+    if not _AGENT_RE.fullmatch(agent):
+        return _tool_error("validation_error", "agent must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}")
+    return await request_json(
+        "DELETE", f"/api/v1/subscriptions/{agent}", params={"pattern": pattern},
+        tool_name="fleet_unsubscribe", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_list_subscriptions(
+    agent: str | None = None,
+    topic: str | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """List subscriptions: all, one agent's, or those matching a concrete topic."""
+    return await request_json(
+        "GET", "/api/v1/subscriptions", params=_present(agent=agent, topic=topic),
+        tool_name="fleet_list_subscriptions", shape=_response_shape,
+    )
+
+
+@mcp.tool(
+    tags={_PLUGIN, "read"},
+    annotations={"readOnlyHint": True, "idempotentHint": True},
+)
+async def fleet_list_publications(
+    pattern: str | None = None,
+    since_id: int | None = 0,
+    limit: int | None = None,
+    order: str = "asc",
+    before_id: int | None = None,
+    _response_shape: _Shape = None,
+) -> Any:
+    """Replay topic publication history. asc: oldest first, cursor -> since_id; desc: newest first, cursor -> before_id."""
+    return await request_json(
+        "GET", "/api/v1/publications",
+        params={"pattern": pattern, "since_id": since_id, "limit": limit,
+                "order": order, "before_id": before_id},
+        tool_name="fleet_list_publications", shape=_response_shape,
     )
 
 

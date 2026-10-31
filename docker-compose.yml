@@ -227,8 +227,8 @@ services:
   # (text + image + audio) on OpenAI-compatible /v1/embeddings. Opt-in: start with
   # `docker compose up -d embed`. See docs/gemma-multimodal-embedding.md.
   embed:
-    # Pinned build (>= b11457 adds the gemma-embedding2 arch, llama.cpp PR #30054). Never `latest`.
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11457
+    # Pinned build (>= b11457 adds the gemma-embedding2 arch, llama.cpp PR #30054; b11457 has no published CUDA image, b11459 is the first). Never `latest`.
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11459
     container_name: whiskers-embed
     # -hf downloads the Q8_0 weights (never FP16) into LLAMA_CACHE; --mmproj-auto
     # pulls the repo's matching mmproj-embeddinggemma-2-*.gguf projector alongside.

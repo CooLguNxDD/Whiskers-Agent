@@ -258,6 +258,29 @@ async def create_job_layout(
         return result
 
 
+async def find_reusable_job_layout(job_application_job_id: str, tenant_id: int) -> dict | None:
+    """Newest non-derived, non-degraded bake for this job in the tenant, else None.
+
+    Keyed on ``job_application_job_id`` (not unique in the schema, hence newest
+    wins). Degraded rows are skipped so a re-run can replace a poor bake rather
+    than keep serving it. NULL-tenant rows never match.
+    """
+    if not (job_application_job_id or "").strip():
+        return None
+    async with get_async_session() as session:
+        stmt = (
+            select(PortfolioJobLayout)
+            .where(PortfolioJobLayout.job_application_job_id == job_application_job_id)
+            .where(PortfolioJobLayout.tenant_id == int(tenant_id))
+            .where(PortfolioJobLayout.is_derived.is_(False))
+            .where(PortfolioJobLayout.degraded.is_(False))
+            .order_by(PortfolioJobLayout.id.desc())
+            .limit(1)
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        return _job_layout_to_dict(row) if row else None
+
+
 async def get_job_layout_by_short_id(short_id: str) -> dict | None:
     """Retrieve a baked job layout artifact by its short_id."""
     async with get_async_session() as session:

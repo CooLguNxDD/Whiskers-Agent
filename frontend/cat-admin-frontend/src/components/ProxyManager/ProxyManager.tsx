@@ -1,4 +1,4 @@
-import { useState, useRef, type FC, type FormEvent, useEffect } from "react"
+import { useState, type FC, type FormEvent } from "react"
 import {
   useProxiesQuery,
   useAddProxyMutation,
@@ -13,6 +13,7 @@ import { getErrorMessage } from "@/utils/errors"
 
 /**
  * Manages proxy connections and configurations.
+ * Status is read-only on load; only an explicit Test/Reconnect click re-mounts a proxy.
  */
 export const ProxyManager: FC = () => {
   const { data: proxies = [], isPending } = useProxiesQuery()
@@ -35,16 +36,8 @@ export const ProxyManager: FC = () => {
   const [customDescription, setCustomDescription] = useState("")
   const [workspaceLabel, setWorkspaceLabel] = useState("")
   const [editDesc, setEditDesc] = useState<{ name: string; value: string; workspaceLabel: string } | null>(null)
-  const pinged = useRef(false)
-
-  // Automatically test configured proxies once on mount to refresh their live status.
-  useEffect(() => {
-    if (pinged.current || proxies.length === 0) return
-    pinged.current = true
-    for (const p of proxies) {
-      testProxyMutation.mutate(p.name)
-    }
-  }, [proxies, testProxyMutation])
+  // No auto-test on mount: test_proxy re-mounts and re-activates, which undid an operator's
+  // "inactive" and the backend breaker's unmount. Errored proxies auto-reconnect server-side.
 
   // OAuth Config State
   const [authorizeUrl, setAuthorizeUrl] = useState("")
@@ -710,7 +703,8 @@ export const ProxyManager: FC = () => {
                         }`}
                         style={{ marginRight: 4 }}
                       />
-                      Test
+                      {/* An errored proxy is unmounted; the same call re-mounts it. */}
+                      {proxy.status === "error" ? "Reconnect" : "Test"}
                     </button>
                     <button
                       className="ct-btn-danger"

@@ -1,8 +1,8 @@
 {
   "name": "cat_fleet_chat_plugin",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "tier": "free",
-  "description": "Proxy MCP tools for Cat Fleet Chat: channels, tasks, attachments, event waits, v2 mail, feed, knowledge, proposals and evolve state.",
+  "description": "Proxy MCP tools for Cat Fleet Chat: channels, tasks, attachments, event waits, v2 mail, feed, knowledge, proposals, evolve state, topic pub/sub, durable consumers, chat relays (Discord/Slack/Telegram) and the control-plane audit log.",
   "author": "Whiskers Agent",
   "requires": [],
   "capabilities": [
@@ -27,6 +27,11 @@
     "fleet_mail_read",
     "fleet_mail_ack",
     "fleet_mail_counts",
+    "fleet_publish",
+    "fleet_subscribe",
+    "fleet_unsubscribe",
+    "fleet_list_subscriptions",
+    "fleet_list_publications",
     "fleet_feed_post",
     "fleet_feed_reply",
     "fleet_feed_repost",
@@ -42,7 +47,24 @@
     "fleet_get_proposal",
     "fleet_create_proposal",
     "fleet_update_proposal",
-    "fleet_get_evolve_state"
+    "fleet_get_evolve_state",
+    "fleet_consumer_list",
+    "fleet_consumer_create",
+    "fleet_consumer_update",
+    "fleet_consumer_delete",
+    "fleet_consumer_wait",
+    "fleet_consumer_ack",
+    "fleet_consumer_seek",
+    "fleet_audit_list",
+    "fleet_relay_list",
+    "fleet_relay_get",
+    "fleet_relay_update",
+    "fleet_relay_bind",
+    "fleet_relay_unbind",
+    "fleet_relay_route_add",
+    "fleet_relay_route_update",
+    "fleet_relay_route_seek",
+    "fleet_relay_route_remove"
   ],
   "scopes": [
     {
@@ -51,15 +73,19 @@
     },
     {
       "token": "group:cat_fleet_chat_plugin:read",
-      "description": "Read messages, channels, tasks, attachments, mail/counts, feed/threads, knowledge/topics, proposals and evolve state"
+      "description": "Read messages, channels, tasks, attachments, mail/counts, feed/threads, knowledge/topics, proposals, evolve state, topic subscriptions and publication history, durable consumers, chat relays and the audit log"
     },
     {
       "token": "group:cat_fleet_chat_plugin:write",
-      "description": "Post messages/attachments, manage tasks/channels, send/read/ack mail, post/reply/repost/react on feed, record knowledge and manage proposals"
+      "description": "Post messages/attachments, manage tasks/channels, send/read/ack mail, post/reply/repost/react on feed, record knowledge, manage proposals, publish to topics and manage subscriptions, create/ack/seek durable consumers"
     },
     {
       "token": "group:cat_fleet_chat_plugin:wait",
-      "description": "Park a turn waiting for a mention or event"
+      "description": "Park a turn waiting for a mention, event or durable-consumer delivery"
+    },
+    {
+      "token": "group:cat_fleet_chat_plugin:admin",
+      "description": "Change chat relays: config, bindings (platform channel to hub channel) and routes (events delivered to Discord/Slack/Telegram)"
     }
   ],
   "gate": {

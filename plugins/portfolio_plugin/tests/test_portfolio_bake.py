@@ -729,3 +729,119 @@ async def test_ship_best_layout_is_flagged_as_degraded():
     assert res["degraded"] is True
     assert "agentic_jury_never_passed" in [e["code"] for e in res["errors"]]
     assert mock_create.call_args.kwargs["degraded"] is True
+
+
+@pytest.mark.asyncio
+async def test_bake_reuses_existing_layout_for_same_job():
+    """Same job id + tenant returns the stored layout; nothing new is minted."""
+    existing = {
+        "short_id": "abc123",
+        "audience": "recruiter",
+        "star_query": "q",
+        "layout_json": _HERO_LAYOUT,
+        "compose_path": "agentic_layout_agent",
+        "mode": "agentic",
+    }
+    with (
+        patch(f"{MODULE}.find_reusable_job_layout", new=AsyncMock(return_value=existing)),
+        patch(f"{MODULE}.record_bake_run", new=AsyncMock()),
+        patch(f"{MODULE}._compose_job_layout", new=AsyncMock()) as mock_compose,
+        patch(f"{MODULE}.create_job_layout", new=AsyncMock()) as mock_create,
+        patch(f"{MODULE}.current_tenant_id") as mock_tid,
+    ):
+        mock_tid.get.return_value = 7
+        res = await bake_portfolio_for_job(
+            job_description="jd", company="Acme", role="Eng", job_application_job_id="job-1"
+        )
+    assert res["status"] == "ok"
+    assert res["short_id"] == "abc123" and res["reused"] is True
+    assert res["bake_status"] == "ok"
+    mock_compose.assert_not_awaited()
+    mock_create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_bake_force_skips_reuse_lookup():
+    with (
+        patch(f"{MODULE}.find_reusable_job_layout", new=AsyncMock()) as mock_find,
+        patch(f"{MODULE}.resolve_job_posting_text", new=AsyncMock(side_effect=lambda text, **k: text)),
+        patch(f"{MODULE}._compose_job_layout", new=AsyncMock(return_value=(None, "d", "q", []))),
+        patch(f"{MODULE}.record_bake_run", new=AsyncMock()),
+        patch(f"{MODULE}.current_tenant_id") as mock_tid,
+    ):
+        mock_tid.get.return_value = 7
+        res = await bake_portfolio_for_job(
+            job_description="jd", company="Acme", role="Eng", job_application_job_id="job-1", force=True
+        )
+    mock_find.assert_not_awaited()
+    assert res["error"] == "layout_compose_failed"
+    assert res["bake_status"] == "failed"
+    assert res["bake_status_reason"] == "layout_compose_failed"
+
+
+@pytest.mark.asyncio
+async def test_job_signals_dispatch_uses_qualified_operation_id():
+    """Catalog ids are plugin-qualified; a bare 'fetch_url' was 'Unknown operation'."""
+    seen = []
+
+    async def fake_execute(plugin_id, operation_id, args, *, caller_scopes):
+        seen.append((plugin_id, operation_id))
+        return {"status": "ok"}
+
+    with patch("core.route_registry.execute.execute_operation", new=fake_execute):
+        from plugins.portfolio_plugin.bake.job_signals import _call_plugin_op
+
+        await _call_plugin_op("search_plugin", "fetch_url", {"url": "https://x.test"})
+    assert seen == [("search_plugin", "search_plugin__fetch_url")]
+
+
+@pytest.mark.asyncio
+async def test_execute_plugin_tool_falls_back_to_bare_name_on_not_found():
+    from core.route_registry.execute import ExecuteError, execute_plugin_tool
+
+    calls = []
+
+    async def fake_execute(plugin_id, operation_id, args, *, caller_scopes):
+        calls.append(operation_id)
+        if operation_id.startswith("search_plugin__"):
+            raise ExecuteError("not_found", f"Unknown operation ('search_plugin', {operation_id!r})", status=404)
+        return {"ok": 1}
+
+    with patch("core.route_registry.execute.execute_operation", new=fake_execute):
+        out = await execute_plugin_tool("search_plugin", "web_search", {}, caller_scopes=None)
+    assert out == {"ok": 1}
+    assert calls == ["search_plugin__web_search", "web_search"]
+
+
+@pytest.mark.asyncio
+async def test_execute_plugin_tool_propagates_nested_not_found():
+    from core.route_registry.execute import ExecuteError, execute_plugin_tool
+
+    calls = []
+
+    async def fake_execute(plugin_id, operation_id, args, *, caller_scopes):
+        calls.append(operation_id)
+        raise ExecuteError("not_found", "Unknown operation ('other', 'other__x')", status=404)
+
+    with patch("core.route_registry.execute.execute_operation", new=fake_execute):
+        with pytest.raises(ExecuteError):
+            await execute_plugin_tool("search_plugin", "web_search", {}, caller_scopes=None)
+    assert calls == ["search_plugin__web_search"]
+
+
+@pytest.mark.asyncio
+async def test_bake_rebakes_when_theme_differs_from_stored_layout():
+    existing = {"short_id": "abc", "layout_json": {"meta": {"theme": "cozy"}}}
+    with (
+        patch(f"{MODULE}.find_reusable_job_layout", new=AsyncMock(return_value=existing)),
+        patch(f"{MODULE}.resolve_job_posting_text", new=AsyncMock(side_effect=lambda text, **k: text)),
+        patch(f"{MODULE}._compose_job_layout", new=AsyncMock(return_value=(None, "d", "q", []))),
+        patch(f"{MODULE}.record_bake_run", new=AsyncMock()),
+        patch(f"{MODULE}.current_tenant_id") as mock_tid,
+    ):
+        mock_tid.get.return_value = 7
+        res = await bake_portfolio_for_job(
+            job_description="jd", company="A", role="B", job_application_job_id="j", theme="neon"
+        )
+    assert res.get("reused") is not True
+    assert res["error"] == "layout_compose_failed"

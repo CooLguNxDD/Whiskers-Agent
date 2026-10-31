@@ -75,6 +75,37 @@ describe("ProxyManager", () => {
     expect(screen.getByPlaceholderText("e.g. http://localhost:5001/mcp")).toBeInTheDocument()
   })
 
+  it("does not test (re-mount) proxies on mount", () => {
+    const testMutate = vi.fn()
+    vi.mocked(useTestProxyMutation).mockReturnValue({
+      mutate: testMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useTestProxyMutation>)
+    render(<ProxyManager />)
+    expect(testMutate).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByText("Test"))
+    expect(testMutate).toHaveBeenCalledWith("test-proxy")
+  })
+
+  it("labels the button Reconnect on an errored proxy", () => {
+    vi.mocked(useProxiesQuery).mockReturnValue({
+      data: [
+        {
+          id: "2",
+          name: "dead-proxy",
+          transport: "http",
+          url: "https://upstream.example/mcp",
+          status: "error",
+          authMode: "none",
+          toolCount: 0,
+        },
+      ],
+      isPending: false,
+    } as unknown as ReturnType<typeof useProxiesQuery>)
+    render(<ProxyManager />)
+    expect(screen.getByText("Reconnect")).toBeInTheDocument()
+  })
+
   it("shows error message if name or URL is missing on submit", () => {
     render(<ProxyManager />)
     const submitBtn = screen.getByText("Add & Mount")

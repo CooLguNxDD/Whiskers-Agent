@@ -13,6 +13,7 @@ PATCH  /api/proxies/session_gated/{name}               — Update an upstream pr
 POST   /api/proxies/session_gated/{name}/oauth/start   — Initiate OAuth 2.0 PKCE flow for a proxy and return authorization URL.
 POST   /api/proxies/session_gated/{name}/reindex       — Re-snapshot, re-contribute, and re-embed routes for an upstream proxy.
 POST   /api/proxies/session_gated/{name}/test          — Test and re-connect to an upstream proxy, updating its status.
+POST   /api/proxies/session_gated/{name}/reconnect     — Same as test; re-mount an errored/unavailable proxy now.
 """
 
 import asyncio
@@ -374,6 +375,25 @@ async def remove_proxy_route(request: Request) -> Response:
 )
 async def test_proxy_route(request: Request) -> Response:
     """Test and re-connect to an upstream proxy, updating its status."""
+    return await _reconnect(request, "test_proxy")
+
+
+@http_route_registry.route(
+    route="proxies",
+    endpoint="{name}/reconnect",
+    methods=["POST"],
+    name="reconnect_proxy",
+    auth_policy=AuthPolicy.SESSION_GATED,
+    required_scopes=("core:whiskers.proxy:write",),
+    owner="api.proxy",
+)
+async def reconnect_proxy_route(request: Request) -> Response:
+    """Rebuild and re-mount an errored/unavailable proxy now (same as ``test``, clearer name)."""
+    return await _reconnect(request, "reconnect_proxy")
+
+
+async def _reconnect(request: Request, route_name: str) -> Response:
+    """Shared body of the ``test`` / ``reconnect`` routes: ``proxy_manager.test_proxy``."""
     payload = await _validate_session_cookie(request)
     if payload is None:
         return JSONResponse({"error": "unauthenticated"}, status_code=401)
@@ -388,7 +408,7 @@ async def test_proxy_route(request: Request) -> Response:
     except ValueError as val_err:
         return JSONResponse({"error": "not_found", "message": str(val_err)}, status_code=404)
     except Exception as e:
-        logger.exception("test_proxy route error")
+        logger.exception("%s route error", route_name)
         return JSONResponse(
             {"error": "internal_error", "message": "An unexpected error occurred."},
             status_code=500,
