@@ -804,10 +804,44 @@ async def test_execute_plugin_tool_falls_back_to_bare_name_on_not_found():
     async def fake_execute(plugin_id, operation_id, args, *, caller_scopes):
         calls.append(operation_id)
         if operation_id.startswith("search_plugin__"):
-            raise ExecuteError("not_found", "nope", status=404)
+            raise ExecuteError("not_found", f"Unknown operation ('search_plugin', {operation_id!r})", status=404)
         return {"ok": 1}
 
     with patch("core.route_registry.execute.execute_operation", new=fake_execute):
         out = await execute_plugin_tool("search_plugin", "web_search", {}, caller_scopes=None)
     assert out == {"ok": 1}
     assert calls == ["search_plugin__web_search", "web_search"]
+
+
+@pytest.mark.asyncio
+async def test_execute_plugin_tool_propagates_nested_not_found():
+    from core.route_registry.execute import ExecuteError, execute_plugin_tool
+
+    calls = []
+
+    async def fake_execute(plugin_id, operation_id, args, *, caller_scopes):
+        calls.append(operation_id)
+        raise ExecuteError("not_found", "Unknown operation ('other', 'other__x')", status=404)
+
+    with patch("core.route_registry.execute.execute_operation", new=fake_execute):
+        with pytest.raises(ExecuteError):
+            await execute_plugin_tool("search_plugin", "web_search", {}, caller_scopes=None)
+    assert calls == ["search_plugin__web_search"]
+
+
+@pytest.mark.asyncio
+async def test_bake_rebakes_when_theme_differs_from_stored_layout():
+    existing = {"short_id": "abc", "layout_json": {"meta": {"theme": "cozy"}}}
+    with (
+        patch(f"{MODULE}.find_reusable_job_layout", new=AsyncMock(return_value=existing)),
+        patch(f"{MODULE}.resolve_job_posting_text", new=AsyncMock(side_effect=lambda text, **k: text)),
+        patch(f"{MODULE}._compose_job_layout", new=AsyncMock(return_value=(None, "d", "q", []))),
+        patch(f"{MODULE}.record_bake_run", new=AsyncMock()),
+        patch(f"{MODULE}.current_tenant_id") as mock_tid,
+    ):
+        mock_tid.get.return_value = 7
+        res = await bake_portfolio_for_job(
+            job_description="jd", company="A", role="B", job_application_job_id="j", theme="neon"
+        )
+    assert res.get("reused") is not True
+    assert res["error"] == "layout_compose_failed"

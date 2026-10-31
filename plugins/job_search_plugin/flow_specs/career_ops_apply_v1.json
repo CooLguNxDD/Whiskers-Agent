@@ -108,6 +108,7 @@
         "offer_text",
         "posting_url",
         "job_id",
+        "job_application_job_id",
         "url",
         "role_title",
         "via",
@@ -167,6 +168,7 @@
         "company",
         "role",
         "posting_url",
+        "job_application_job_id",
         "theme"
       ],
       "writes": [

@@ -211,3 +211,12 @@ docker exec -e PYTHONPATH=/app whiskers-mcp-server pytest \
 - `job-search-pipeline` (`plugins/job_search_plugin/skills/job-search-pipeline/JOB_SEARCH_SKILL.md`) — full per-tool inventory, injected into planner prompts
 - `inference-guide` — OperationCatalog / `execute_operation` mechanics this flow relies on
 - `scope-management` — scope grammar behind the token list above
+
+## Bake reuse and status
+
+- The `bake` stage receives `job_application_job_id` (from the ingest `job_id`), so re-running the pipeline for the
+  same posting returns the existing non-degraded `?j=` layout (`reused: true`) instead of minting a new one. A
+  different `theme` re-bakes; an edited JD needs `bake_portfolio_for_job(force=True)`.
+- Every bake returns `bake_status` (`ok|degraded|failed`) + `bake_status_reason`. `prepare_application_record`
+  writes non-ok values into the application `notes` as `portfolio_bake=…` and the pipeline result carries them.
+- Sibling tools are dispatched with `core.route_registry.execute.execute_plugin_tool` (qualified op id first).

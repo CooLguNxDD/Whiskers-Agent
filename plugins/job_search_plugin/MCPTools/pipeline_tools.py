@@ -136,6 +136,8 @@ async def resolve_pipeline_signals(
         "offer_text": offer_text,
         "posting_url": posting_url,
         "job_id": job_id,
+        # Parameter name bake_portfolio_for_job expects; enables layout reuse per job.
+        "job_application_job_id": job_id,
         "url": posting_url,
         "role_title": role,
         "via": via,
@@ -176,9 +178,14 @@ async def prepare_application_record(
     recorded in the notes; when the bake stage wrote nothing it is inferred
     (no id → ``failed``) so a swallowed bake failure is never silent.
     """
-    if not bake_status:
-        bake_status = "ok" if (portfolio_job_id or "").strip() else "failed"
-        bake_status_reason = bake_status_reason or ("" if bake_status == "ok" else "no_portfolio_link")
+    bake_status = (bake_status or "").strip().lower()
+    if bake_status not in ("ok", "degraded", "failed"):
+        bake_status = ""
+    if not (portfolio_job_id or "").strip() and bake_status != "failed":
+        # No link means the bake did not ship, whatever the stage claimed.
+        bake_status, bake_status_reason = "failed", bake_status_reason or "no_portfolio_link"
+    elif not bake_status:
+        bake_status = "ok"
 
     fit_score = None
     if isinstance(verdict, dict):

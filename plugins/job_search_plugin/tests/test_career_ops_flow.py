@@ -112,13 +112,13 @@ def test_claims_do_not_steal_portfolio_turns():
     assert spec.claims.matches(goal="apply to this job posting", goal_class=None)
 
 
-def test_bake_stage_never_reads_job_application_job_id_or_provider():
-    """Cycle guard: bake must never be handed the fields that route it back into
-    job_search_plugin.get_job_details (see enrich_tools._auto_bake_portfolio).
+def test_bake_stage_never_reads_provider():
+    """Cycle guard: bake must never be handed ``provider``. get_job_details is only
+    dispatched when job_application_job_id AND provider are both set
+    (bake/job_signals.py), so the id alone (needed for layout reuse) is safe.
     """
     spec = _load_spec()
     bake = next(s for s in spec.stages if s.id == "bake")
-    assert "job_application_job_id" not in bake.reads
     assert "provider" not in bake.reads
 
 
@@ -532,3 +532,23 @@ async def test_tailor_cover_letter_returns_cover_letter_text_alias():
 
     assert res["tailored_text"] == "Dear Hiring Manager, ..."
     assert res["cover_letter_text"] == "Dear Hiring Manager, ..."
+
+
+@pytest.mark.asyncio
+async def test_prepare_application_record_ok_status_without_link_is_failed():
+    from plugins.job_search_plugin.MCPTools.pipeline_tools import prepare_application_record
+
+    res = await prepare_application_record(portfolio_job_id="", bake_status="OK")
+    assert res["bake_status"] == "failed"
+
+
+def test_bake_stage_reads_job_application_job_id():
+    import json
+    from pathlib import Path
+
+    spec = json.loads(
+        (Path(__file__).parent.parent / "flow_specs" / "career_ops_apply_v1.json").read_text()
+    )
+    stages = {s["id"]: s for s in spec["stages"]}
+    assert "job_application_job_id" in stages["bake"]["reads"]
+    assert "job_application_job_id" in stages["signals"]["writes"]

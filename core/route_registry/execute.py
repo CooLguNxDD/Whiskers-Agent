@@ -160,7 +160,9 @@ async def execute_plugin_tool(
     try:
         return await execute_operation(plugin_id, qualified, args, caller_scopes=caller_scopes)
     except ExecuteError as exc:
-        if exc.code != "not_found" or qualified == tool_name:
+        # Only the dispatch miss for *this* id; a nested not_found must propagate.
+        missed_here = repr(qualified) in exc.message
+        if exc.code != "not_found" or qualified == tool_name or not missed_here:
             raise
     return await execute_operation(plugin_id, tool_name, args, caller_scopes=caller_scopes)
 

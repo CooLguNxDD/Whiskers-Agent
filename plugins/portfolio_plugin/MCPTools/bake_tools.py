@@ -111,7 +111,8 @@ async def bake_portfolio_for_job(
     When ``job_application_job_id`` is given and the tenant already has a
     non-degraded bake for it, that layout is returned (``reused: true``) instead
     of minting a new short id, so links already sent keep working. Pass
-    ``force=True`` to re-bake on purpose; a prebuilt ``layout`` always persists.
+    ``force=True`` to re-bake on purpose (a differing ``theme`` also re-bakes;
+    other changed inputs, e.g. an edited JD, need ``force``); a prebuilt ``layout`` always persists.
     Without a job id every call mints a fresh short id.
 
     Every result carries ``bake_status`` (``ok`` | ``degraded`` | ``failed``) and
@@ -182,6 +183,9 @@ async def bake_portfolio_for_job(
         except Exception as exc:
             logger.warning("bake: reuse lookup fail-open: %s", exc)
             existing = None
+        stored_theme = ((existing or {}).get("layout_json") or {}).get("meta", {}).get("theme")
+        if existing and theme and stored_theme and theme != stored_theme:
+            existing = None  # a different theme is a different request; re-bake
         if existing:
             await record_bake_run(
                 ctx,
