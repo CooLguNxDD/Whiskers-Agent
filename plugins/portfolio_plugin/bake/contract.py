@@ -25,11 +25,11 @@ logger = logging.getLogger("whiskers.plugins.portfolio.bake.contract")
 # band_coverage_lt is unverified against floor layouts.
 # unknown_block_dropped is a real defect but not worth withholding an otherwise
 #   good page over.
-# ungrounded_block CANNOT be authoritative yet: ``_sourceRefs`` is popped from
-#   every block (compose/custom_layout.py, compose/context_enrich.py) before the
-#   layout reaches this gate, so the check sees no refs on any bake and would
-#   reject all of them. Promote to blocking once refs are durable in the
-#   per-block sidecar; until then it is a signal, not a verdict.
+# ungrounded_block stays warn-only: compose (compose/custom_layout.py,
+#   compose/context_enrich.py) pops per-block ``_sourceRefs`` before this gate
+#   and folds them into a flat, deduped ``meta.sources`` list with no block id,
+#   so grounding can only be checked per layout, not per block. Promote to
+#   blocking once refs are durable per block; until then it is a signal.
 _WARN_ONLY = frozenset(
     {
         "unknown_block_dropped",
@@ -165,12 +165,31 @@ def structural_quality(
     return (not errs), errs
 
 
-def _grounding_violations(report: QualityReport, blocks: list[dict]) -> None:
+def _layout_source_refs(layout: dict[str, Any] | None) -> set[str]:
+    """Refs compose folded into ``meta.sources`` (``[{"ref": ...}]`` or str)."""
+    meta = layout.get("meta") if isinstance(layout, dict) else None
+    sources = meta.get("sources") if isinstance(meta, dict) else None
+    if not isinstance(sources, list):
+        return set()
+    refs: set[str] = set()
+    for s in sources:
+        r = s.get("ref") if isinstance(s, dict) else s
+        if isinstance(r, str) and r.strip():
+            refs.add(r.strip())
+    return refs
+
+
+def _grounding_violations(
+    report: QualityReport, blocks: list[dict], layout: dict[str, Any] | None = None
+) -> None:
     """Flag blocks whose type requires source refs but carry none.
 
-    Refs live on the in-flight ``_sourceRefs`` key, which is popped before
-    persistence — so this only sees them pre-pop. Absent catalog data, skip
-    rather than fail: an unavailable catalog must not fail every bake.
+    A block is grounded by its in-flight ``_sourceRefs`` or by the layout's
+    ``meta.sources``. Compose pops ``_sourceRefs`` and folds them into
+    ``meta.sources`` as a flat, deduped list with no block id, so after the
+    pop the mapping is per layout: any cited source grounds every authored
+    block. Absent catalog data, skip rather than fail: an unavailable catalog
+    must not fail every bake.
     """
     try:
         from plugins.portfolio_plugin.schema.block_catalog import get_block_catalog
@@ -180,6 +199,7 @@ def _grounding_violations(report: QualityReport, blocks: list[dict]) -> None:
         logger.debug("contract: block catalog unavailable, skipping grounding: %s", exc)
         return
 
+    layout_refs = _layout_source_refs(layout)
     ungrounded: list[str] = []
     for b in blocks:
         if not isinstance(b, dict):
@@ -192,7 +212,7 @@ def _grounding_violations(report: QualityReport, blocks: list[dict]) -> None:
             continue
         if policy == "required_if_authored" and getattr(feat, "grounding", "") != "authored":
             continue
-        if not b.get("_sourceRefs"):
+        if not b.get("_sourceRefs") and not layout_refs:
             ungrounded.append(str(b.get("id") or b.get("type") or "?"))
 
     report.dimensions["ungrounded_blocks"] = len(ungrounded)
@@ -329,7 +349,7 @@ def assess_bake_quality(
         logger.debug("contract: band coverage skipped: %s", exc)
 
     # --- grounding ------------------------------------------------------------
-    _grounding_violations(report, blocks)
+    _grounding_violations(report, blocks, layout)
 
     # --- zero-paste: fish blurb must not be raw inventory summary prefix ------
     _raw_summary_dump_violations(report, blocks)
