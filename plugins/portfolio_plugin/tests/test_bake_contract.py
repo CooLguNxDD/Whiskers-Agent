@@ -74,8 +74,8 @@ def test_unknown_block_type_is_reported_not_silently_dropped():
 
 
 def test_authored_block_without_source_refs_is_ungrounded():
-    """Reported, but warn-only: _sourceRefs is popped before the gate sees the
-    layout, so treating this as blocking would reject every real bake."""
+    """Reported, but warn-only: grounding is only checkable per layout once
+    compose folds _sourceRefs into meta.sources."""
     lay = valid_bake_layout()
     lay["blocks"].append({"type": "prose", "id": "prose-oct", "props": {"markdown": "hi"}})
     report = assess_bake_quality(lay, goal_class="bake_for_job")
@@ -87,6 +87,28 @@ def test_authored_block_without_source_refs_is_ungrounded():
     clean = assess_bake_quality(lay, goal_class="bake_for_job")
     assert "ungrounded_block" not in clean.codes()
 
+
+
+def test_authored_block_grounded_by_meta_sources_only():
+    """Compose pops _sourceRefs and folds them into meta.sources before the
+    gate; a block grounded that way must not be flagged."""
+    lay = valid_bake_layout()
+    lay["blocks"].append({"type": "prose", "id": "prose-oct", "props": {"markdown": "hi"}})
+    lay["meta"]["sources"] = [{"ref": "project:opencat"}]
+    report = assess_bake_quality(lay, goal_class="bake_for_job")
+    assert "ungrounded_block" not in report.codes()
+    assert report.dimensions["ungrounded_blocks"] == 0
+
+
+def test_authored_block_ungrounded_when_no_refs_anywhere():
+    """No _sourceRefs and empty / blank meta.sources: still flagged, warn-only."""
+    lay = valid_bake_layout()
+    lay["blocks"].append({"type": "prose", "id": "prose-oct", "props": {"markdown": "hi"}})
+    lay["meta"]["sources"] = [{"ref": "  "}]
+    report = assess_bake_quality(lay, goal_class="bake_for_job")
+    assert "ungrounded_block" in report.codes()
+    assert report.dimensions["ungrounded_blocks"] == 1
+    assert report.passed is True
 
 def test_ship_best_fails_the_contract():
     """A best loser must not read as an approved page."""
