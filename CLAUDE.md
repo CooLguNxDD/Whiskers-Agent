@@ -200,6 +200,9 @@ Flat return contract: `apply_shape_async` returns bare list/dict unless `include
 reference themselves, and the offload leaf walk exploded to a 4 GB OOM. The offload walkers
 (`collect_string_leaves`, `extract_large_artifacts`) are cycle-safe (skip containers already on the path).
 UI-layout tools (`bake_portfolio_for_job`) are `"passthrough": true` in `response_shapes`.
+Setup only copies `config/tools_api_config_example.json` when the active (gitignored) file is missing, so an
+existing install must add `"bake_portfolio_for_job": { "passthrough": true }` under `response_shapes` by hand
+(keeps operator edits; the OOM fix itself is in code and does not depend on it).
 `core_graph/node/execute_step.py::_unwrap_discovery_envelope` is the GOAP boundary that flattens
 `{_meta,data}` envelopes. `run_graph` output guarded by `_sanitize_envelope` / `_compress_carrier`
 (CSV compression before the truncation sentinel; sacred fields never touched).

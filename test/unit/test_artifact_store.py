@@ -241,6 +241,7 @@ async def test_extract_large_artifacts_cycle_safe():
     rows = [{"id": f"r{i}", "text": "y" * 40} for i in range(30)]
     for r in rows:
         r["_meta"] = {"rows": rows}
-    slim, refs = await extract_large_artifacts({"data": rows}, session_id=None, tenant_id=1, min_bytes=2000)
+    # min_bytes below the 1,200-byte leaf total so the adaptive branch runs _walk over the cycle.
+    slim, refs = await extract_large_artifacts({"data": rows}, session_id=None, tenant_id=1, min_bytes=1000)
     assert refs == []
     assert len(slim["data"]) == 30
