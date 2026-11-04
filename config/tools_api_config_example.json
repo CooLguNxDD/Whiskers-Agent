@@ -27,6 +27,7 @@
       "strip_empty": true,
       "offload_minio": true
     },
+    "bake_portfolio_for_job": { "passthrough": true },
     "ListSessions": {
       "project": {
         "id": true,

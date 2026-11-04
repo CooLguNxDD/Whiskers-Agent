@@ -382,3 +382,26 @@ def test_strip_base64_fields_subclasses():
     res_tup = strip_base64_fields(tup)
     assert isinstance(res_tup, list)
     assert res_tup == [1, 2, "[base64 stripped]"]
+
+
+def test_normalize_include_meta_does_not_alias_record_lists_into_rows():
+    """A nested record list in root meta must not be broadcast into its own rows (cycle → OOM)."""
+    import json
+
+    from utils.response_shape import _normalize
+
+    blocks = [{"id": f"b{i}", "type": "card", "body": "x" * 50} for i in range(30)]
+    payload = {
+        "status": "ok",
+        "short_id": "abc",
+        "layout": {"meta": {"theme": "dark", "tags": ["a", "b"]}, "blocks": blocks},
+    }
+    rows = _normalize(payload, include_meta=True)
+
+    assert len(rows) == 30
+    meta = rows[0]["_meta"]
+    assert meta["status"] == "ok"
+    assert meta["layout_meta_theme"] == "dark"
+    assert meta["layout_meta_tags"] == ["a", "b"]
+    assert "layout_blocks" not in meta
+    json.dumps(rows)  # acyclic — would raise ValueError on a circular reference
