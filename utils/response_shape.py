@@ -211,6 +211,13 @@ def _strip_empty(data: Any) -> Any:
     return handler(data) if handler else data
 
 
+def _is_broadcastable_meta(value: Any) -> bool:
+    """True for scalars and lists of scalars — safe to copy into every normalized row."""
+    if isinstance(value, (list, tuple)):
+        return all(not isinstance(v, (dict, list, tuple)) for v in value)
+    return not isinstance(value, (dict, set))
+
+
 def _normalize(data: Any, include_meta: bool = False) -> Any:
     """Extract the primary record list from a nested response structure,
     optionally broadcasting root-level metadata into each record.
@@ -231,8 +238,12 @@ def _normalize(data: Any, include_meta: bool = False) -> Any:
                 meta_raw = {k: v for k, v in data.items() if type(v) is not list and k != "_meta"}
                 
                 #Flatten the metadata (e.g., 'totalCount': {'count': 10} -> 'totalCount_count': 10)
-                flat_meta = flatten_dict(meta_raw)
-                
+                # Keep scalars / lists-of-scalars only: flatten_dict keeps list values by
+                # reference, so a nested record list (e.g. layout.blocks) would land in every
+                # row's _meta and point back at the rows themselves — a cycle that made the
+                # offload leaf walk explode to GBs (OOM on bake_portfolio_for_job).
+                flat_meta = {k: v for k, v in flatten_dict(meta_raw).items() if _is_broadcastable_meta(v)}
+
                 #Inject the flattened metadata into every row of the primary list
                 for row in primary_list:
                     if isinstance(row, dict):

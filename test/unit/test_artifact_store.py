@@ -220,3 +220,28 @@ async def test_extract_skips_when_disabled_threshold():
     )
     assert slim is step_results
     assert refs == []
+
+
+def test_collect_string_leaves_is_cycle_safe():
+    """A self-referencing payload is walked once per path, not exponentially to the depth bound."""
+    from core.artifact_store.store import collect_string_leaves
+
+    rows = [{"id": f"r{i}", "text": "y" * 40} for i in range(30)]
+    for r in rows:
+        r["_meta"] = {"rows": rows}
+    leaves = collect_string_leaves({"data": rows}, path="response")
+    assert len(leaves) == 60
+
+
+@pytest.mark.asyncio
+async def test_extract_large_artifacts_cycle_safe():
+    """extract_large_artifacts terminates quickly on a cyclic payload with nothing to offload."""
+    from core.artifact_store.store import extract_large_artifacts
+
+    rows = [{"id": f"r{i}", "text": "y" * 40} for i in range(30)]
+    for r in rows:
+        r["_meta"] = {"rows": rows}
+    # min_bytes below the 1,200-byte leaf total so the adaptive branch runs _walk over the cycle.
+    slim, refs = await extract_large_artifacts({"data": rows}, session_id=None, tenant_id=1, min_bytes=1000)
+    assert refs == []
+    assert len(slim["data"]) == 30

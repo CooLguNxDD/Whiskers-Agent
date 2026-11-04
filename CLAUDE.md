@@ -195,6 +195,14 @@ Key behaviors:
 ### 3.4 Response pipeline (`utils/response_shape.py`, `response_format.py`)
 Async-only 11 steps: normalize → offload_minio → strip_* → dedupe → project → limit → include_meta → format.
 Flat return contract: `apply_shape_async` returns bare list/dict unless `include_meta: true`.
+`_normalize(include_meta=True)` broadcasts only scalars / lists-of-scalars into each row's `_meta`
+(`_is_broadcastable_meta`) — a nested record list (e.g. `layout.blocks`) copied by reference made rows
+reference themselves, and the offload leaf walk exploded to a 4 GB OOM. The offload walkers
+(`collect_string_leaves`, `extract_large_artifacts`) are cycle-safe (skip containers already on the path).
+UI-layout tools (`bake_portfolio_for_job`) are `"passthrough": true` in `response_shapes`.
+Setup only copies `config/tools_api_config_example.json` when the active (gitignored) file is missing, so an
+existing install must add `"bake_portfolio_for_job": { "passthrough": true }` under `response_shapes` by hand
+(keeps operator edits; the OOM fix itself is in code and does not depend on it).
 `core_graph/node/execute_step.py::_unwrap_discovery_envelope` is the GOAP boundary that flattens
 `{_meta,data}` envelopes. `run_graph` output guarded by `_sanitize_envelope` / `_compress_carrier`
 (CSV compression before the truncation sentinel; sacred fields never touched).

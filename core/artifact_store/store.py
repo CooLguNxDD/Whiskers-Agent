@@ -73,21 +73,36 @@ def collect_string_leaves(
     path: str = "root",
     depth: int = 0,
     out: list[tuple[str, int]] | None = None,
+    _ancestors: set[int] | None = None,
 ) -> list[tuple[str, int]]:
-    """Return (path, utf8_byte_len) for every string leaf (diagnostic / ranking)."""
+    """Return (path, utf8_byte_len) for every string leaf (diagnostic / ranking).
+
+    Cycle-safe: a container already on the current path is skipped, so a
+    self-referencing payload can't fan out exponentially up to the depth bound.
+    """
     if out is None:
         out = []
     if depth > _MAX_WALK_DEPTH:
         return out
     if isinstance(node, str):
         out.append((path, len(node.encode("utf-8"))))
-    elif isinstance(node, dict):
-        for k, v in node.items():
-            child = f"{path}.{k}" if path else str(k)
-            collect_string_leaves(v, path=child, depth=depth + 1, out=out)
-    elif isinstance(node, list):
-        for i, v in enumerate(node):
-            collect_string_leaves(v, path=f"{path}[{i}]", depth=depth + 1, out=out)
+        return out
+    if not isinstance(node, (dict, list)):
+        return out
+    ancestors = _ancestors if _ancestors is not None else set()
+    if id(node) in ancestors:
+        return out
+    ancestors.add(id(node))
+    try:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                child = f"{path}.{k}" if path else str(k)
+                collect_string_leaves(v, path=child, depth=depth + 1, out=out, _ancestors=ancestors)
+        else:
+            for i, v in enumerate(node):
+                collect_string_leaves(v, path=f"{path}[{i}]", depth=depth + 1, out=out, _ancestors=ancestors)
+    finally:
+        ancestors.discard(id(node))
     return out
 
 
@@ -417,9 +432,22 @@ async def extract_large_artifacts(
             logger.warning("artifact offload failed path=%s: %s", path, exc)
             return None
 
+    on_path: set[int] = set()
+
     async def _walk(node: Any, path: str, depth: int) -> None:
         if len(refs) >= max_artifacts or depth > _MAX_WALK_DEPTH:
             return
+        if isinstance(node, (dict, list)):
+            # Cycle guard (mirrors collect_string_leaves).
+            if id(node) in on_path:
+                return
+            on_path.add(id(node))
+            try:
+                await _walk_container(node, path, depth)
+            finally:
+                on_path.discard(id(node))
+
+    async def _walk_container(node: Any, path: str, depth: int) -> None:
         if isinstance(node, dict):
             for key, val in list(node.items()):
                 child_path = f"{path}.{key}" if path else str(key)
