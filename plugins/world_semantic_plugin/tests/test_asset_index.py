@@ -439,3 +439,52 @@ async def test_thin_adapters_fail_closed_and_do_not_accept_tenant(monkeypatch):
     request = SimpleNamespace(headers={}, path_params={"world_id": "library"})
     response = await adapters.search_assets_http(request)
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_worldgen_v1_index_uses_configured_cache_root(monkeypatch):
+    from plugins.world_semantic_plugin import asset_adapters as adapters
+
+    service = AsyncMock(return_value={"status": "enqueued"})
+    monkeypatch.setattr(adapters, "index_assets_service", service)
+    body = {"version": 1, "assets": [asset(reference={"image": "sheets/ab/key/view-0-front.png"})]}
+
+    assert await adapters._index(body, 1, "wgv3-assets") == {"status": "enqueued"}
+    service.assert_awaited_once_with(body, tenant_id=1, world_id="wgv3-assets",
+                                     trusted_root=Path("tmp/worldgen-asset-index"))
+
+
+@pytest.mark.parametrize("tenant,world", [(2, "wgv3-assets"), (1, "other-world")])
+def test_worldgen_cache_root_does_not_leak_to_other_namespaces(tenant, world):
+    from plugins.world_semantic_plugin import asset_adapters as adapters
+
+    with pytest.raises(ValueError, match="no trusted asset ingestion root configured"):
+        adapters._trusted_root(tenant, world)
+
+
+def test_worldgen_cache_mount_matches_trusted_root():
+    import yaml
+    from plugins.world_semantic_plugin import asset_adapters as adapters
+
+    root = Path(__file__).resolve().parents[3]
+    compose = yaml.safe_load((root / "docker-compose.yml").read_text(encoding="utf-8"))
+    target = (Path("/app") / adapters._trusted_root(1, "wgv3-assets")).as_posix()
+    mount, = [v for v in compose["services"]["whiskers-agent"]["volumes"]
+              if isinstance(v, dict) and v.get("target") == target]
+    assert mount["type"] == "bind"
+    assert mount["source"] == "${WORLDGEN_ASSET_INDEX_CACHE:-./tmp/worldgen-asset-index}"
+    assert mount["read_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_worldgen_v3_index_still_uses_pack_roots(monkeypatch):
+    from plugins.world_semantic_plugin import asset_adapters as adapters
+
+    service = AsyncMock(return_value={"status": "enqueued"})
+    roots = {}
+    monkeypatch.setattr(adapters, "index_assets_service", service)
+    monkeypatch.setattr(adapters.asset_packs, "pack_roots_for", lambda tenant, world: roots)
+    body = {"version": 3, "assets": []}
+
+    await adapters._index(body, 1, "wgv3-assets")
+    service.assert_awaited_once_with(body, tenant_id=1, world_id="wgv3-assets", pack_roots=roots)

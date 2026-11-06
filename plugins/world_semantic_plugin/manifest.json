@@ -38,6 +38,11 @@
     "default_base_res": 10,
     "default_anchor_lat": 0.0,
     "default_anchor_lng": 0.0,
-    "default_meters_per_degree": 111320.0
+    "default_meters_per_degree": 111320.0,
+    "asset_ingestion_roots": {
+      "1": {
+        "wgv3-assets": "tmp/worldgen-asset-index"
+      }
+    }
   }
 }
