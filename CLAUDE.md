@@ -289,7 +289,8 @@ config/                 server_config.json, plugin_config.json, tools_api_config
 docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract),
                         embedding-reindex.md (re-embed runbook)
                         worktree-clean-check.md
-migrations/             Alembic core chain (versions/core/)
+migrations/             Alembic core chain (versions/core/; core_052_embedding_jobs_dedup_name.py
+                        guards an in-place constraint rename; preserves the legacy second head)
 Tools/                  tools_generator.py, semantic_tools_generator.py, migration_generator.py,
                         openapi_pipeline/ (live OpenAPI / FastAPI / Flask / Express ingest)
 terminal/               setup TUIs + scripts (setup.py, setup_tui.py, ui.py, manage_credentials.py);
@@ -297,7 +298,8 @@ terminal/               setup TUIs + scripts (setup.py, setup_tui.py, ui.py, man
 scripts/                dev.py, migrate.py, reseed.py, run_tests.py, check_worktree_clean.py (step-completion
                         stray/lockfile check, see docs/worktree-clean-check.md), gen_graph_topology.py,
                         compile_notebooklm_*.py, upsert_all_*.py
-test/                   unit/ (~200 modules), integration/ (route + persistence suites)
+test/                   unit/ (~200 modules; test_embedding_jobs_dedup_migration.py covers
+                        core_052 rename/no-op guards and both heads), integration/ (route + persistence suites)
 frontend/               cat-admin-frontend (React admin console), console
 whiskers-vscode/      VS Code extension (gated PTY, step-up auth)
 claude-plugins/         Claude Code marketplace: portfolio-gen, world-context
