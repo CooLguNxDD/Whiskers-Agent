@@ -122,6 +122,11 @@ services:
     volumes:
       # Optional: mount local code for development (disabled in production)
       - .:/app
+      # WorldGen v1 reference paths are relative to this read-only render cache.
+      - type: bind
+        source: ${WORLDGEN_ASSET_INDEX_CACHE:-./tmp/worldgen-asset-index}
+        target: /app/tmp/worldgen-asset-index
+        read_only: true
       # Docker socket: lets the setup TUI restart this container from inside itself
       # (scripts/setup.py::run_restart via docker-py). SECURITY: grants this container
       # full host-Docker control (container-escape-equivalent). Single-operator/dev only.

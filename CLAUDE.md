@@ -543,7 +543,10 @@ goals/                  agent goal files / achieve() persistence
   owned row; hex vectors bind to `world-hex-v1:[tenant_id, world_id]` and search also filters `meta.tenant_id`.
   Asset `world_id`s are tenant-private library namespaces (rows keyed by tenant), not `worlds` rows.
   Bodies with `tenant_id`/`trusted_root`, mismatched `world_id` or projection patches are 400; trusted roots
-  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). Exact signatures, root configuration, retry lease, migration ownership and API details:
+  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). WorldGen's version-1 client uses
+  `asset_ingestion_roots["1"]["wgv3-assets"] = "tmp/worldgen-asset-index"`; Compose mounts
+  `WORLDGEN_ASSET_INDEX_CACHE` read-only at `/app/tmp/worldgen-asset-index` (empty local default).
+  Exact signatures, root configuration, retry lease, migration ownership and API details:
   [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
   [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
   [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
