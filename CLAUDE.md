@@ -749,3 +749,5 @@ Marketplace `whiskers-oct` (`.claude-plugin/marketplace.json`):
   block authoring, portfolio PRs, context sourcing. Consumed headless by CatPortfolio's
   `.github/workflows/portfolio-gen.yml`.
 - **world-context** — Unity ↔ `world_semantic_plugin` routing; `/world-index`, `/world-query`.
+
+@.fleet-rules.md
