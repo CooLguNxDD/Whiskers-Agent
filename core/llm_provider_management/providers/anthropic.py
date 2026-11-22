@@ -20,9 +20,16 @@ logger = logging.getLogger("whiskers")
 
 
 def _chat(model: str, api_key: str | None, base_url: str | None):  # noqa: ARG001 - base_url unused (no local-endpoint support)
-    """Build a ChatAnthropic client."""
+    """Build a ChatAnthropic client.
+
+    Do not send temperature, top_p, or top_k. API version 2026-10-21 (the
+    anthropic SDK 2.x default) returns 400 ``temperature: Extra inputs are
+    not permitted`` when any sampling parameter is present, including
+    ``temperature=0``. langchain-anthropic moves those fields into
+    ``extra_body``, and the API still rejects them.
+    """
     from langchain_anthropic import ChatAnthropic
-    kwargs = {"model": model or "claude-sonnet-5", "temperature": 0}
+    kwargs = {"model": model or "claude-sonnet-5"}
     if api_key:
         kwargs["api_key"] = api_key
     return ChatAnthropic(**kwargs)
