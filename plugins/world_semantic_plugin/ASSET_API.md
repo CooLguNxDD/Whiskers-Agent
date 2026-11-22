@@ -166,9 +166,16 @@ paths, remote URLs and audio queries are rejected. Tags use AND containment.
 
 Configure trusted roots **server-side**, e.g. manifest/runtime `SETTINGS`:
 `asset_ingestion_roots = {"<verified tenant integer>": {"<world>": "<trusted repo-relative root>"}}`.
-No deployment root is shipped or guessed; adapters fail until one is configured.
-S04 should preserve this authorized mapping rather than accepting a root from
-Unity/request payloads.
+The manifest maps tenant `1`, world `wgv3-assets`, to `tmp/worldgen-asset-index`
+(under `/app` in Docker). Set `WORLDGEN_ASSET_INDEX_CACHE` to the absolute host
+render-cache directory before recreating `whiskers-agent`; Compose mounts it
+read-only at `/app/tmp/worldgen-asset-index`, defaulting to an empty local directory.
+The current WorldGen client sends `version: 1` with cache-relative paths such as
+`sheets/ab/<key>/view-0-front.png`, so it needs `asset_ingestion_roots`, not the
+version-3 `asset_pack_roots` contract below. Keep this local-only library on the
+local Whiskers endpoint; v1 records do not carry v3 distribution/mirror protection.
+Other tenant/world pairs still require an explicit server-side mapping; never
+accept a trusted root from Unity/request payloads.
 
 ## Operational limitation
 

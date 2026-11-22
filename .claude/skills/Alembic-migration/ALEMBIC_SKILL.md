@@ -292,6 +292,12 @@ Rules:
 
 ## 13. Testing Migrations
 
+`core_052` repairs the unnamed `core_014` embedding_jobs unique constraint by
+rename only. Check `pg_constraint` on the resolved table: source must exist and
+destination must be absent (inverse guards on downgrade). Keep `core_052` after
+`core_051` and the independent `568ee6fe3f3f` head. Regression tests live in
+`test/unit/test_embedding_jobs_dedup_migration.py`; they need no database.
+
 ```python
 @pytest.fixture(scope="session")
 def migrated_db():

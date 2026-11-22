@@ -289,7 +289,8 @@ config/                 server_config.json, plugin_config.json, tools_api_config
 docs/                   gemma-multimodal-embedding.md (configured adapter wire/serving contract),
                         embedding-reindex.md (re-embed runbook)
                         worktree-clean-check.md
-migrations/             Alembic core chain (versions/core/)
+migrations/             Alembic core chain (versions/core/; core_052_embedding_jobs_dedup_name.py
+                        guards an in-place constraint rename; preserves the legacy second head)
 Tools/                  tools_generator.py, semantic_tools_generator.py, migration_generator.py,
                         openapi_pipeline/ (live OpenAPI / FastAPI / Flask / Express ingest)
 terminal/               setup TUIs + scripts (setup.py, setup_tui.py, ui.py, manage_credentials.py);
@@ -297,7 +298,8 @@ terminal/               setup TUIs + scripts (setup.py, setup_tui.py, ui.py, man
 scripts/                dev.py, migrate.py, reseed.py, run_tests.py, check_worktree_clean.py (step-completion
                         stray/lockfile check, see docs/worktree-clean-check.md), gen_graph_topology.py,
                         compile_notebooklm_*.py, upsert_all_*.py
-test/                   unit/ (~200 modules), integration/ (route + persistence suites)
+test/                   unit/ (~200 modules; test_embedding_jobs_dedup_migration.py covers
+                        core_052 rename/no-op guards and both heads), integration/ (route + persistence suites)
 frontend/               cat-admin-frontend (React admin console), console
 whiskers-vscode/      VS Code extension (gated PTY, step-up auth)
 claude-plugins/         Claude Code marketplace: portfolio-gen, world-context
@@ -543,7 +545,10 @@ goals/                  agent goal files / achieve() persistence
   owned row; hex vectors bind to `world-hex-v1:[tenant_id, world_id]` and search also filters `meta.tenant_id`.
   Asset `world_id`s are tenant-private library namespaces (rows keyed by tenant), not `worlds` rows.
   Bodies with `tenant_id`/`trusted_root`, mismatched `world_id` or projection patches are 400; trusted roots
-  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). Exact signatures, root configuration, retry lease, migration ownership and API details:
+  are server `SETTINGS` (`asset_ingestion_roots`, `world_snapshot_roots`). WorldGen's version-1 client uses
+  `asset_ingestion_roots["1"]["wgv3-assets"] = "tmp/worldgen-asset-index"`; Compose mounts
+  `WORLDGEN_ASSET_INDEX_CACHE` read-only at `/app/tmp/worldgen-asset-index` (empty local default).
+  Exact signatures, root configuration, retry lease, migration ownership and API details:
   [`plugins/world_semantic_plugin/ASSET_API.md`](plugins/world_semantic_plugin/ASSET_API.md),
   [`plugins/world_semantic_plugin/WORLD_HEX_API.md`](plugins/world_semantic_plugin/WORLD_HEX_API.md), and
   [`plugins/world_semantic_plugin/SETUP_GUIDE.md`](plugins/world_semantic_plugin/SETUP_GUIDE.md).
@@ -744,3 +749,5 @@ Marketplace `whiskers-oct` (`.claude-plugin/marketplace.json`):
   block authoring, portfolio PRs, context sourcing. Consumed headless by CatPortfolio's
   `.github/workflows/portfolio-gen.yml`.
 - **world-context** — Unity ↔ `world_semantic_plugin` routing; `/world-index`, `/world-query`.
+
+@.fleet-rules.md
